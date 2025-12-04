@@ -17,49 +17,32 @@
         -webkit-user-select: none;
         background-color: #333;
       }
-      /* Custom scanline effect */
-      .scanlines {
-        background: linear-gradient(
-          to bottom,
-          rgba(255,255,255,0),
-          rgba(255,255,255,0) 50%,
-          rgba(0,0,0,0.1) 50%,
-          rgba(0,0,0,0.1)
-        );
-        background-size: 100% 4px;
-        position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        pointer-events: none;
-        z-index: 50;
-      }
-      @keyframes groundScroll {
-        from { background-position: 0 0; }
-        to { background-position: -24px 0; } /* 24px is a tile size */
-      }
       .animate-ground {
         animation: groundScroll 0.5s linear infinite;
       }
       .paused {
         animation-play-state: paused;
       }
+      @keyframes groundScroll {
+        from { background-position: 0 0; }
+        to { background-position: -24px 0; }
+      }
     </style>
-  <script type="importmap">
+    <script type="importmap">
 {
   "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.1",
-    "react-dom/client": "https://aistudiocdn.com/react-dom@^19.2.1/client",
-    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.1",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
-    "peerjs": "https://aistudiocdn.com/peerjs@^1.5.5",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "peerjs": "https://esm.sh/peerjs@1.5.2?bundle",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
-    "react/": "https://aistudiocdn.com/react@^19.2.1/"
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
   }
 }
 </script>
 </head>
   <body class="bg-gray-900 overflow-hidden text-white h-screen w-screen flex items-center justify-center">
     <div id="root" class="w-full h-full flex items-center justify-center"></div>
-    <!-- Babel will fetch, compile, and run this script -->
-    <script type="text/babel" data-type="module" data-presets="typescript,react" src="./index.tsx"></script>
+    <script type="text/babel" data-type="module" src="./index.tsx"></script>
   </body>
 </html>

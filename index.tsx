@@ -1,17 +1,24 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import Peer from 'peerjs';
-import { Copy, Play, RotateCcw } from 'lucide-react';
+
+// ==========================================
+// ICONS (Inline SVGs to avoid dependency issues)
+// ==========================================
+const IconPlay = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+);
+const IconCopy = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+);
+const IconRotateCcw = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+);
 
 // ==========================================
 // TYPES
 // ==========================================
 type GameStatus = 'MENU' | 'LOBBY' | 'PLAYING' | 'GAME_OVER';
-
-interface Position {
-  x: number;
-  y: number;
-}
 
 interface BirdState {
   id: string;
@@ -34,7 +41,6 @@ interface GameState {
   score: number;
   birds: { [id: string]: BirdState };
   pipes: PipeData[];
-  groundX: number;
 }
 
 type NetworkMessage =
@@ -56,10 +62,8 @@ const PIPE_GAP = 140;
 const PIPE_WIDTH = 52;
 const BIRD_SIZE = 34;
 const GROUND_HEIGHT = 112;
-
 const GAME_WIDTH = 400;
 const GAME_HEIGHT = 600;
-
 const BIRD_START_X = 80;
 const BIRD_START_Y = GAME_HEIGHT / 2.5;
 
@@ -68,20 +72,16 @@ const BIRD_START_Y = GAME_HEIGHT / 2.5;
 // ==========================================
 class PeerService {
   private peer: Peer | null = null;
-  private conn: any = null; // using any to bypass strict PeerJS types in babel environment if needed
+  private conn: any = null;
   private myId: string = '';
   
   public onConnect?: (partnerId: string) => void;
   public onData?: (data: NetworkMessage) => void;
   public onDisconnect?: () => void;
 
-  constructor() {}
-
   async init(givenId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.peer = new Peer(givenId || '', {
-        debug: 1
-      });
+      this.peer = new Peer(givenId || '', { debug: 1 });
 
       this.peer.on('open', (id) => {
         console.log('My Peer ID is: ' + id);
@@ -140,25 +140,18 @@ class PeerService {
     }
   }
 
-  getId() {
-    return this.myId;
-  }
-
   destroy() {
-    if (this.conn) {
-      this.conn.close();
-    }
-    if (this.peer) {
-      this.peer.destroy();
-    }
+    if (this.conn) this.conn.close();
+    if (this.peer) this.peer.destroy();
   }
 }
 
 const peerService = new PeerService();
 
 // ==========================================
-// COMPONENT: BIRD
+// COMPONENTS
 // ==========================================
+
 const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
   return (
     <div
@@ -180,26 +173,15 @@ const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
         <div className="absolute top-[-2px] right-2 w-1.5 h-1.5 bg-black rounded-full z-20 animate-pulse"></div>
         <div className="absolute top-[8px] left-[-2px] w-5 h-3 bg-white border-2 border-black rounded-full z-10 opacity-80"></div>
         <div className="absolute bottom-[-2px] right-[-6px] w-4 h-3 bg-[#f97316] border-2 border-black rounded-sm z-10"></div>
-        
         {!isMe && (
-           <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-white font-bold drop-shadow-[1px_1px_0_#000] tracking-tighter">
-             P2
-           </div>
+           <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-white font-bold drop-shadow-[1px_1px_0_#000] tracking-tighter">P2</div>
         )}
       </div>
     </div>
   );
 };
 
-// ==========================================
-// COMPONENT: GAME CANVAS
-// ==========================================
-interface GameCanvasProps {
-  gameState: GameState;
-  myId: string;
-}
-
-const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
+const GameCanvas: React.FC<{ gameState: GameState; myId: string }> = ({ gameState, myId }) => {
   const sortedBirds = (Object.values(gameState.birds) as BirdState[]).sort((a, b) => {
     if (a.id === myId) return 1;
     if (b.id === myId) return -1;
@@ -211,7 +193,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
       className="relative overflow-hidden bg-[#70c5ce] shadow-2xl ring-8 ring-black rounded-lg select-none"
       style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
     >
-      {/* Background */}
       <div 
         className="absolute bottom-[100px] left-0 w-full opacity-50 pointer-events-none"
         style={{
@@ -227,30 +208,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         <div className="absolute bottom-0 left-0 w-full h-4 bg-[#5ca66a]"></div>
       </div>
 
-      {/* Pipes */}
       {gameState.pipes.map((pipe) => (
         <React.Fragment key={pipe.id}>
           <div
             className="absolute border-x-4 border-b-4 border-black bg-[#73bf2e]"
-            style={{
-              left: pipe.x,
-              top: 0,
-              width: PIPE_WIDTH,
-              height: pipe.topHeight,
-            }}
+            style={{ left: pipe.x, top: 0, width: PIPE_WIDTH, height: pipe.topHeight }}
           >
              <div className="absolute bottom-0 left-[-4px] w-[calc(100%+8px)] h-8 border-4 border-black bg-[#73bf2e]"></div>
              <div className="absolute top-0 right-2 w-2 h-full bg-[#9ce659] opacity-40"></div>
           </div>
-
           <div
             className="absolute border-x-4 border-t-4 border-black bg-[#73bf2e]"
-            style={{
-              left: pipe.x,
-              bottom: GROUND_HEIGHT, 
-              width: PIPE_WIDTH,
-              height: GAME_HEIGHT - GROUND_HEIGHT - pipe.topHeight - PIPE_GAP,
-            }}
+            style={{ left: pipe.x, bottom: GROUND_HEIGHT, width: PIPE_WIDTH, height: GAME_HEIGHT - GROUND_HEIGHT - pipe.topHeight - PIPE_GAP }}
           >
              <div className="absolute top-0 left-[-4px] w-[calc(100%+8px)] h-8 border-4 border-black bg-[#73bf2e]"></div>
              <div className="absolute top-0 right-2 w-2 h-full bg-[#9ce659] opacity-40"></div>
@@ -258,7 +227,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </React.Fragment>
       ))}
 
-      {/* Ground */}
       <div 
         className={`absolute bottom-0 w-full z-30 border-t-4 border-black bg-[#ded895] ${gameState.status === 'PLAYING' || gameState.status === 'LOBBY' ? 'animate-ground' : ''} ${gameState.status === 'GAME_OVER' ? 'paused' : ''}`}
         style={{ 
@@ -272,28 +240,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </div>
       </div>
 
-      {/* Birds */}
-      {sortedBirds.map((bird) => (
-        <Bird key={bird.id} bird={bird} isMe={bird.id === myId} />
-      ))}
+      {sortedBirds.map((bird) => <Bird key={bird.id} bird={bird} isMe={bird.id === myId} />)}
 
-      {/* Score */}
       {gameState.status !== 'MENU' && (
         <div className="absolute top-16 w-full text-center z-40 pointer-events-none">
-            <span className="text-5xl font-bold text-white drop-shadow-[3px_3px_0_#000] stroke-black" style={{ WebkitTextStroke: '2px black' }}>
-            {gameState.score}
-            </span>
+            <span className="text-5xl font-bold text-white drop-shadow-[3px_3px_0_#000] stroke-black" style={{ WebkitTextStroke: '2px black' }}>{gameState.score}</span>
         </div>
       )}
       
-      {/* Messages */}
       {gameState.status === 'LOBBY' && (
         <div className="absolute top-1/3 w-full text-center animate-bounce">
             <span className="text-2xl font-bold text-[#f97316] drop-shadow-[2px_2px_0_#fff] bg-black/50 px-4 py-2 rounded">GET READY!</span>
         </div>
       )}
 
-      {/* Game Over */}
       {gameState.status === 'GAME_OVER' && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20">
             <div className="bg-[#ded895] border-4 border-black p-4 text-center shadow-[8px_8px_0_#000] animate-in zoom-in duration-300">
@@ -303,22 +263,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
                         <p className="text-[10px] text-[#f97316] font-bold">SCORE</p>
                         <p className="text-2xl text-white font-bold drop-shadow-[1px_1px_0_#000]">{gameState.score}</p>
                     </div>
-                     <div className="bg-[#cbb968] border-2 border-black p-2 w-24 rounded">
-                        <p className="text-[10px] text-[#f97316] font-bold">BEST</p>
-                        <p className="text-2xl text-white font-bold drop-shadow-[1px_1px_0_#000]">{gameState.score}</p>
-                    </div>
                 </div>
             </div>
         </div>
       )}
-      
       <div id="flash-overlay" className="absolute inset-0 bg-white pointer-events-none opacity-0 transition-opacity duration-100"></div>
     </div>
   );
 };
 
 // ==========================================
-// COMPONENT: APP
+// APP LOGIC
 // ==========================================
 const INITIAL_BIRD: BirdState = {
   id: '',
@@ -333,8 +288,7 @@ const INITIAL_GAME_STATE: GameState = {
   status: 'MENU',
   score: 0,
   birds: {},
-  pipes: [],
-  groundX: 0
+  pipes: []
 };
 
 const App = () => {
@@ -433,7 +387,6 @@ const App = () => {
         startGameLogic();
         break;
       case 'RESTART':
-        resetGameLocal();
         startGameLogic();
         break;
       case 'DIE':
@@ -460,8 +413,6 @@ const App = () => {
   };
 
   const loop = (time: number) => {
-    const dt = time - lastTimeRef.current;
-    
     if (stateRef.current.status === 'PLAYING') {
         let needsSync = false;
         const current = stateRef.current;
@@ -476,14 +427,11 @@ const App = () => {
             if (!bird.isDead) {
                 bird.velocity += GRAVITY;
                 bird.y += bird.velocity;
-                
-                if (bird.velocity < 0) {
-                    bird.rotation = -25;
-                } else if (bird.velocity > 0) {
+                if (bird.velocity < 0) bird.rotation = -25;
+                else if (bird.velocity > 0) {
                     bird.rotation += 2;
                     if (bird.rotation > 90) bird.rotation = 90;
                 }
-
                 if (bird.y + BIRD_SIZE >= GAME_HEIGHT - GROUND_HEIGHT) {
                     bird.y = GAME_HEIGHT - GROUND_HEIGHT - BIRD_SIZE;
                     bird.isDead = true;
@@ -492,10 +440,7 @@ const App = () => {
                         peerService.send({ type: 'DIE', playerId: myId, y: bird.y });
                     }
                 }
-                if (bird.y < 0) {
-                    bird.y = 0;
-                    bird.velocity = 0;
-                }
+                if (bird.y < 0) { bird.y = 0; bird.velocity = 0; }
             } else {
                  if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
                      bird.y += 10;
@@ -506,21 +451,14 @@ const App = () => {
 
         // Pipes
         nextPipes.forEach(p => p.x -= PIPE_SPEED);
-        if (nextPipes.length > 0 && nextPipes[0].x + PIPE_WIDTH < -50) {
-            nextPipes.shift();
-        }
+        if (nextPipes.length > 0 && nextPipes[0].x + PIPE_WIDTH < -50) nextPipes.shift();
 
         if (isHost) {
             if (frameRef.current % PIPE_SPAWN_RATE === 0) {
                  const minPipeH = 50;
                  const maxPipeH = GAME_HEIGHT - GROUND_HEIGHT - PIPE_GAP - minPipeH;
                  const randomH = Math.floor(Math.random() * (maxPipeH - minPipeH + 1)) + minPipeH;
-                 nextPipes.push({
-                     id: Date.now(),
-                     x: GAME_WIDTH,
-                     topHeight: randomH,
-                     passed: false
-                 });
+                 nextPipes.push({ id: Date.now(), x: GAME_WIDTH, topHeight: randomH, passed: false });
                  needsSync = true;
             }
             nextPipes.forEach(p => {
@@ -535,13 +473,7 @@ const App = () => {
         // Collisions
         const myBird = nextBirds[myId];
         if (myBird && !myBird.isDead) {
-            const birdHitbox = { 
-                t: myBird.y + 8, 
-                b: myBird.y + BIRD_SIZE - 8, 
-                l: BIRD_START_X + 8, 
-                r: BIRD_START_X + BIRD_SIZE - 8 
-            };
-            
+            const birdHitbox = { t: myBird.y + 8, b: myBird.y + BIRD_SIZE - 8, l: BIRD_START_X + 8, r: BIRD_START_X + BIRD_SIZE - 8 };
             for (const p of nextPipes) {
                 if (birdHitbox.r > p.x && birdHitbox.l < p.x + PIPE_WIDTH) {
                      if (birdHitbox.t < p.topHeight || birdHitbox.b > p.topHeight + PIPE_GAP) {
@@ -553,10 +485,7 @@ const App = () => {
             }
         }
 
-        const allDead = (Object.values(nextBirds) as BirdState[]).every(b => b.isDead);
-        if (allDead) {
-            nextStatus = 'GAME_OVER';
-        }
+        if ((Object.values(nextBirds) as BirdState[]).every(b => b.isDead)) nextStatus = 'GAME_OVER';
 
         updateState(prev => ({
             ...prev,
@@ -566,9 +495,7 @@ const App = () => {
             status: nextStatus as GameStatus
         }));
 
-        if (isHost && (needsSync || frameRef.current % 15 === 0)) {
-            sendSync();
-        }
+        if (isHost && (needsSync || frameRef.current % 15 === 0)) sendSync();
     }
     
     lastTimeRef.current = time;
@@ -580,29 +507,13 @@ const App = () => {
       updateState(prev => {
           const resetBirds: {[id:string]: BirdState} = {};
           Object.keys(prev.birds).forEach(k => {
-              resetBirds[k] = { 
-                  ...prev.birds[k], 
-                  y: BIRD_START_Y, 
-                  velocity: 0, 
-                  isDead: false, 
-                  rotation: 0 
-              };
+              resetBirds[k] = { ...prev.birds[k], y: BIRD_START_Y, velocity: 0, isDead: false, rotation: 0 };
           });
-          return {
-              ...prev,
-              status: 'PLAYING',
-              score: 0,
-              pipes: [],
-              birds: resetBirds
-          };
+          return { ...prev, status: 'PLAYING', score: 0, pipes: [], birds: resetBirds };
       });
       frameRef.current = 0;
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
       gameLoopRef.current = requestAnimationFrame(loop);
-  };
-
-  const resetGameLocal = () => {
-     // placeholder for local reset logic if needed
   };
 
   const handleRestart = () => {
@@ -636,10 +547,7 @@ const App = () => {
             handleJump();
           }
       };
-      const handleTouch = (e: TouchEvent) => {
-          handleJump();
-      }
-      
+      const handleTouch = () => handleJump();
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('touchstart', handleTouch);
       return () => {
@@ -650,81 +558,45 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 w-full relative">
-      
       <div className="absolute inset-0 bg-[#333] z-0 overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gray-500 via-gray-900 to-black"></div>
       </div>
-
       <div className="relative z-10 w-full max-w-2xl flex flex-col items-center gap-6">
-        
         {gameState.status === 'MENU' && (
             <div className="animate-bounce mb-4">
-                 <h1 className="text-4xl md:text-6xl text-white font-bold tracking-widest drop-shadow-[4px_4px_0_#000]" 
-                    style={{ textShadow: '4px 4px 0px #ea580c' }}>
-                FLAP<br/>TOGETHER
-                </h1>
+                 <h1 className="text-4xl md:text-6xl text-white font-bold tracking-widest drop-shadow-[4px_4px_0_#000]" style={{ textShadow: '4px 4px 0px #ea580c' }}>FLAP<br/>TOGETHER</h1>
             </div>
         )}
-
         {gameState.status === 'MENU' && (
              <div className="bg-[#ded895] p-6 rounded-lg border-4 border-black shadow-[8px_8px_0_#000] w-full max-w-md">
                 {errorMsg && <div className="bg-red-500 text-white p-2 mb-4 text-xs font-bold border-2 border-black animate-pulse">{errorMsg}</div>}
-                
                 <div className="flex flex-col gap-4">
-                    <button 
-                        onClick={() => { setIsHost(true); setGameState(p => ({...p, status: 'LOBBY'})); }}
-                        className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all"
-                    >
-                        <Play size={20} /> CREATE GAME
+                    <button onClick={() => { setIsHost(true); setGameState(p => ({...p, status: 'LOBBY'})); }} className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all">
+                        <IconPlay /> CREATE GAME
                     </button>
-                    
                     <div className="relative flex py-2 items-center">
                         <div className="flex-grow border-t-2 border-black/20"></div>
                         <span className="flex-shrink-0 mx-4 text-black/50 text-xs font-bold">OR JOIN FRIEND</span>
                         <div className="flex-grow border-t-2 border-black/20"></div>
                     </div>
-
                     <form onSubmit={(e) => { e.preventDefault(); if(hostId) { setIsHost(false); peerService.connect(hostId); } }} className="flex gap-2">
-                        <input 
-                            type="text" 
-                            placeholder="PASTE ID HERE"
-                            value={hostId}
-                            onChange={e => setHostId(e.target.value)}
-                            className="flex-1 bg-white border-4 border-black p-2 outline-none font-mono uppercase text-sm placeholder-gray-400"
-                        />
-                        <button 
-                            type="submit"
-                            className="bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold px-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all"
-                        >
-                            JOIN
-                        </button>
+                        <input type="text" placeholder="PASTE ID HERE" value={hostId} onChange={e => setHostId(e.target.value)} className="flex-1 bg-white border-4 border-black p-2 outline-none font-mono uppercase text-sm placeholder-gray-400" />
+                        <button type="submit" className="bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold px-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all">JOIN</button>
                     </form>
                 </div>
-                
                 <div className="mt-6 text-center text-[10px] text-black/60">
                     ID: <span className="font-mono bg-white border border-black px-1">{myId || '...'}</span>
                 </div>
              </div>
         )}
-
         {gameState.status === 'LOBBY' && (
              <div className="bg-[#ded895] p-6 rounded-lg border-4 border-black shadow-[8px_8px_0_#000] w-full max-w-md text-center">
                 <h2 className="text-xl font-bold mb-6 text-[#f97316] drop-shadow-[1px_1px_0_#000]">LOBBY</h2>
-                
                 <div className="flex justify-center gap-8 mb-8">
-                    <div className="flex flex-col items-center">
-                        <div className="w-12 h-12 bg-[#facc15] border-4 border-black mb-2 animate-bounce rounded-sm"></div>
-                        <span className="font-bold text-xs">YOU</span>
-                    </div>
-                    <div className="flex items-center">
-                        <div className="text-2xl font-bold animate-pulse text-black/50">VS</div>
-                    </div>
-                    <div className="flex flex-col items-center">
-                        <div className={`w-12 h-12 border-4 border-black mb-2 rounded-sm transition-colors ${connectedPeer ? 'bg-[#ef4444] animate-bounce' : 'bg-gray-300'}`}></div>
-                        <span className="font-bold text-xs">{connectedPeer ? 'P2' : '...'}</span>
-                    </div>
+                    <div className="flex flex-col items-center"><div className="w-12 h-12 bg-[#facc15] border-4 border-black mb-2 animate-bounce rounded-sm"></div><span className="font-bold text-xs">YOU</span></div>
+                    <div className="flex items-center"><div className="text-2xl font-bold animate-pulse text-black/50">VS</div></div>
+                    <div className="flex flex-col items-center"><div className={`w-12 h-12 border-4 border-black mb-2 rounded-sm transition-colors ${connectedPeer ? 'bg-[#ef4444] animate-bounce' : 'bg-gray-300'}`}></div><span className="font-bold text-xs">{connectedPeer ? 'P2' : '...'}</span></div>
                 </div>
-
                 {isHost ? (
                     <div className="flex flex-col gap-4">
                          {!connectedPeer && (
@@ -732,57 +604,36 @@ const App = () => {
                                 <span className="text-[10px] text-gray-500 font-bold uppercase">Share this ID</span>
                                 <div className="flex items-center gap-2">
                                     <code className="flex-1 text-xs font-mono bg-gray-100 p-1 truncate select-all">{myId}</code>
-                                    <button onClick={handleCopy} className={`p-1 border-2 border-black hover:bg-gray-100 ${copied ? 'bg-green-200' : ''}`}>
-                                        <Copy size={14} />
-                                    </button>
+                                    <button onClick={handleCopy} className={`p-1 border-2 border-black hover:bg-gray-100 ${copied ? 'bg-green-200' : ''}`}><IconCopy /></button>
                                 </div>
                             </div>
                          )}
-
-                        <button 
-                            onClick={() => { peerService.send({ type: 'START_GAME', seed: Date.now() }); startGameLogic(); }}
-                            className="bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold py-4 w-full border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
-                            disabled={!connectedPeer}
-                        >
+                        <button onClick={() => { peerService.send({ type: 'START_GAME', seed: Date.now() }); startGameLogic(); }} className="bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold py-4 w-full border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed" disabled={!connectedPeer}>
                             {connectedPeer ? 'START GAME' : 'WAITING FOR PLAYER...'}
                         </button>
                     </div>
                 ) : (
-                    <div className="text-black/70 animate-pulse font-bold text-sm bg-white/50 p-2 rounded border-2 border-black/20">
-                        WAITING FOR HOST TO START...
-                    </div>
+                    <div className="text-black/70 animate-pulse font-bold text-sm bg-white/50 p-2 rounded border-2 border-black/20">WAITING FOR HOST TO START...</div>
                 )}
              </div>
         )}
-
         {(gameState.status === 'PLAYING' || gameState.status === 'GAME_OVER') && (
             <div className="flex flex-col gap-4 w-full items-center">
                 <GameCanvas gameState={gameState} myId={myId} />
-                
                 {gameState.status === 'GAME_OVER' && isHost && (
-                    <button 
-                         onClick={handleRestart}
-                         className="bg-white text-black px-6 py-3 font-bold border-4 border-black shadow-[4px_4px_0_#000] hover:bg-gray-100 active:translate-y-1 active:shadow-none transition-all flex items-center gap-2"
-                    >
-                        <RotateCcw size={18} /> RESTART
+                    <button onClick={handleRestart} className="bg-white text-black px-6 py-3 font-bold border-4 border-black shadow-[4px_4px_0_#000] hover:bg-gray-100 active:translate-y-1 active:shadow-none transition-all flex items-center gap-2">
+                        <IconRotateCcw /> RESTART
                     </button>
                 )}
                  {gameState.status === 'GAME_OVER' && !isHost && (
-                    <div className="text-white text-shadow animate-pulse font-bold">
-                        WAITING FOR RESTART...
-                    </div>
+                    <div className="text-white text-shadow animate-pulse font-bold">WAITING FOR RESTART...</div>
                 )}
             </div>
         )}
-
       </div>
     </div>
   );
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
-root.render(
-    <React.StrictMode>
-        <App />
-    </React.StrictMode>
-);
+root.render(<React.StrictMode><App /></React.StrictMode>);
