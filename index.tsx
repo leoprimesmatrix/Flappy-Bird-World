@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import Peer from 'peerjs';
 
 // ==========================================
-// ICONS (Inline SVGs to avoid dependency issues)
+// ICONS (Inline SVGs)
 // ==========================================
 const IconPlay = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -71,77 +71,88 @@ const BIRD_START_Y = GAME_HEIGHT / 2.5;
 // SERVICE: PEERJS
 // ==========================================
 class PeerService {
-  private peer: Peer | null = null;
-  private conn: any = null;
-  private myId: string = '';
+  // Use standard class fields without TS modifiers
+  peer = null;
+  conn = null;
+  myId = '';
   
-  public onConnect?: (partnerId: string) => void;
-  public onData?: (data: NetworkMessage) => void;
-  public onDisconnect?: () => void;
+  onConnect = null;
+  onData = null;
+  onDisconnect = null;
 
   async init(givenId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
+      // @ts-ignore
       this.peer = new Peer(givenId || '', { debug: 1 });
 
+      // @ts-ignore
       this.peer.on('open', (id) => {
         console.log('My Peer ID is: ' + id);
         this.myId = id;
         resolve(id);
       });
 
+      // @ts-ignore
       this.peer.on('connection', (conn) => {
         this.handleConnection(conn);
       });
 
+      // @ts-ignore
       this.peer.on('error', (err) => {
         console.error('Peer error:', err);
         reject(err);
       });
       
+      // @ts-ignore
       this.peer.on('disconnected', () => {
-        this.onDisconnect?.();
+        if (this.onDisconnect) this.onDisconnect();
       });
     });
   }
 
   connect(peerId: string) {
     if (!this.peer) return;
+    // @ts-ignore
     const conn = this.peer.connect(peerId);
     this.handleConnection(conn);
   }
 
-  private handleConnection(conn: any) {
+  handleConnection(conn: any) {
     this.conn = conn;
 
     this.conn.on('open', () => {
       console.log('Connected to: ' + conn.peer);
-      this.onConnect?.(conn.peer);
+      if (this.onConnect) this.onConnect(conn.peer);
     });
 
     this.conn.on('data', (data: any) => {
-      this.onData?.(data as NetworkMessage);
+      if (this.onData) this.onData(data as NetworkMessage);
     });
 
     this.conn.on('close', () => {
       console.log('Connection closed');
-      this.onDisconnect?.();
+      if (this.onDisconnect) this.onDisconnect();
       this.conn = null;
     });
 
     this.conn.on('error', (err: any) => {
         console.error('Connection error', err);
-        this.onDisconnect?.();
+        if (this.onDisconnect) this.onDisconnect();
     });
   }
 
   send(data: NetworkMessage) {
+    // @ts-ignore
     if (this.conn && this.conn.open) {
+      // @ts-ignore
       this.conn.send(data);
     }
   }
 
   destroy() {
+    // @ts-ignore
     if (this.conn) this.conn.close();
+    // @ts-ignore
     if (this.peer) this.peer.destroy();
   }
 }
