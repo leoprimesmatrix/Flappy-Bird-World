@@ -46,7 +46,7 @@ export type NetworkMessage =
 export const GRAVITY = 0.45;
 export const JUMP_STRENGTH = -7.5;
 export const PIPE_SPEED = 3.2;
-export const PIPE_SPAWN_RATE_MS = 1800; // ~1.8 seconds
+export const PIPE_SPAWN_RATE_MS = 1600; // 1.6 seconds
 export const PIPE_GAP = 140; 
 export const PIPE_WIDTH = 52;
 export const BIRD_SIZE = 34;
@@ -87,7 +87,8 @@ class PeerService {
 
       this.peer.on('error', (err) => {
         console.error('Peer error:', err);
-        reject(err);
+        // Don't reject immediately on error during runtime, only init
+        if (!this.myId) reject(err);
       });
       
       this.peer.on('disconnected', () => {
@@ -158,7 +159,6 @@ const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
         top: 0,
         zIndex: isMe ? 20 : 10,
         opacity: bird.isDead ? 0.8 : 1,
-        // No transition for smooth Delta Time updates
         transition: 'none', 
       }}
     >
@@ -190,7 +190,7 @@ const GameCanvas: React.FC<{ gameState: GameState; myId: string }> = ({ gameStat
       className="relative overflow-hidden bg-[#70c5ce] shadow-2xl ring-8 ring-black rounded-lg select-none"
       style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
     >
-      {/* City Skyline Background */}
+      {/* Background */}
       <div 
         className="absolute bottom-[100px] left-0 w-full opacity-50 pointer-events-none"
         style={{
@@ -271,7 +271,7 @@ const GameCanvas: React.FC<{ gameState: GameState; myId: string }> = ({ gameStat
         </div>
       )}
 
-      {/* Game Over / Waiting Overlay */}
+      {/* Game Over */}
       {gameState.status === 'GAME_OVER' && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20">
             <div className="bg-[#ded895] border-4 border-black p-4 text-center shadow-[8px_8px_0_#000] animate-in zoom-in duration-300">
@@ -286,7 +286,7 @@ const GameCanvas: React.FC<{ gameState: GameState; myId: string }> = ({ gameStat
         </div>
       )}
       
-      {/* Flash Effect on Death */}
+      {/* Flash */}
       <div id="flash-overlay" className="absolute inset-0 bg-white pointer-events-none opacity-0 transition-opacity duration-100"></div>
     </div>
   );
@@ -324,11 +324,17 @@ function App() {
 
   // Refs for Game Loop
   const stateRef = useRef<GameState>(INITIAL_GAME_STATE);
+  const isHostRef = useRef(false); // Critical: Ref for loop access to host status
   const lastTimeRef = useRef<number>(0);
   const gameLoopRef = useRef<number>(0);
   const spawnTimerRef = useRef<number>(0);
   const syncTimerRef = useRef<number>(0);
   
+  // Sync isHost state to Ref
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
   // Initialize Peer
   useEffect(() => {
     peerService.init().then((id) => {
@@ -394,7 +400,6 @@ function App() {
       case 'JUMP':
         if (stateRef.current.birds[msg.playerId]) {
             const birds = { ...stateRef.current.birds };
-            // Ensure deep copy of the specific bird
             birds[msg.playerId] = { ...birds[msg.playerId], velocity: JUMP_STRENGTH };
             updateState(prev => ({ ...prev, birds }));
         }
@@ -451,16 +456,14 @@ function App() {
 
     const dt = time - lastTimeRef.current;
     lastTimeRef.current = time;
-    // Cap dt to 100ms to prevent huge jumps after tab freeze
     const safeDt = Math.min(dt, 100);
-    // Time scaling relative to 60 FPS (16.66ms)
     const timeScale = safeDt / 16.66;
     
+    // Check status directly from ref
     if (stateRef.current.status === 'PLAYING') {
         let needsSync = false;
         const current = stateRef.current;
         
-        // Deep copy birds to ensure immutability during physics steps
         const nextBirds: { [id: string]: BirdState } = {};
         Object.keys(current.birds).forEach(k => {
             nextBirds[k] = { ...current.birds[k] };
@@ -470,8 +473,8 @@ function App() {
         let nextScore = current.score;
         let nextStatus = current.status;
 
-        // Update Timers
-        if (isHost) {
+        // Use isHostRef to avoid stale closures
+        if (isHostRef.current) {
             spawnTimerRef.current += safeDt;
             syncTimerRef.current += safeDt;
         }
@@ -483,7 +486,6 @@ function App() {
                 bird.velocity += GRAVITY * timeScale;
                 bird.y += bird.velocity * timeScale;
                 
-                // Rotation
                 if (bird.velocity < 0) {
                     bird.rotation = -25;
                 } else if (bird.velocity > 0) {
@@ -491,7 +493,6 @@ function App() {
                     if (bird.rotation > 90) bird.rotation = 90;
                 }
 
-                // Floor collision
                 if (bird.y + BIRD_SIZE >= GAME_HEIGHT - GROUND_HEIGHT) {
                     bird.y = GAME_HEIGHT - GROUND_HEIGHT - BIRD_SIZE;
                     bird.isDead = true;
@@ -500,13 +501,11 @@ function App() {
                         peerService.send({ type: 'DIE', playerId: myId, y: bird.y });
                     }
                 }
-                // Ceiling collision
                 if (bird.y < 0) {
                     bird.y = 0;
                     bird.velocity = 0;
                 }
             } else {
-                 // Dead bird physics (fall to ground)
                  if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
                      bird.y += 10 * timeScale;
                      bird.rotation = 90;
@@ -514,16 +513,17 @@ function App() {
             }
         });
 
-        // 2. Pipes Logic
+        // 2. Pipes Movement
         nextPipes.forEach(p => p.x -= PIPE_SPEED * timeScale);
         if (nextPipes.length > 0 && nextPipes[0].x + PIPE_WIDTH < -50) {
             nextPipes.shift();
         }
 
-        if (isHost) {
-            // Spawn Pipe (Time Based)
+        // 3. Spawning & Score (Host Only)
+        if (isHostRef.current) {
+            // Subtracting interval instead of resetting to 0 for smoother cadence
             if (spawnTimerRef.current >= PIPE_SPAWN_RATE_MS) {
-                 spawnTimerRef.current = 0; 
+                 spawnTimerRef.current -= PIPE_SPAWN_RATE_MS; 
                  const minPipeH = 50;
                  const maxPipeH = GAME_HEIGHT - GROUND_HEIGHT - PIPE_GAP - minPipeH;
                  const randomH = Math.floor(Math.random() * (maxPipeH - minPipeH + 1)) + minPipeH;
@@ -535,7 +535,7 @@ function App() {
                  });
                  needsSync = true;
             }
-            // Score Logic
+            
             nextPipes.forEach(p => {
                 if (!p.passed && p.x + PIPE_WIDTH < BIRD_START_X) {
                     p.passed = true;
@@ -545,7 +545,7 @@ function App() {
             });
         }
 
-        // 3. Collisions (My Bird vs Pipes)
+        // 4. Collisions
         const myBird = nextBirds[myId];
         if (myBird && !myBird.isDead) {
             const birdHitbox = { 
@@ -566,7 +566,7 @@ function App() {
             }
         }
 
-        // 4. Game Over Check (Wait for EVERYONE to be dead)
+        // 5. Game Over
         const allDead = (Object.values(nextBirds) as BirdState[]).every(b => b.isDead);
         if (allDead) {
             nextStatus = 'GAME_OVER';
@@ -580,8 +580,7 @@ function App() {
             status: nextStatus as GameStatus
         }));
 
-        // Sync: If pipes spawned, score changed, or just periodically
-        if (isHost && (needsSync || syncTimerRef.current > 200)) {
+        if (isHostRef.current && (needsSync || syncTimerRef.current > 200)) {
             sendSync();
             if (syncTimerRef.current > 200) syncTimerRef.current = 0;
         }
@@ -591,7 +590,6 @@ function App() {
   };
 
   const startGameLogic = () => {
-      // Reset
       updateState(prev => {
           const resetBirds: {[id:string]: BirdState} = {};
           Object.keys(prev.birds).forEach(k => {
@@ -612,7 +610,6 @@ function App() {
           };
       });
       
-      // Reset timers
       spawnTimerRef.current = 0;
       syncTimerRef.current = 0;
       lastTimeRef.current = 0; 
@@ -621,9 +618,7 @@ function App() {
       gameLoopRef.current = requestAnimationFrame(loop);
   };
 
-  const resetGameLocal = () => {
-      // just a helper state cleaner if needed
-  };
+  const resetGameLocal = () => {};
 
   const handleRestart = () => {
      if (isHost) {
@@ -637,7 +632,6 @@ function App() {
     const myBird = stateRef.current.birds[myId];
     if (myBird && !myBird.isDead) {
         const birds = { ...stateRef.current.birds };
-        // JUMP is instant velocity set, no time scale needed
         birds[myId] = { ...birds[myId], velocity: JUMP_STRENGTH };
         updateState(prev => ({ ...prev, birds }));
         peerService.send({ type: 'JUMP', playerId: myId, timestamp: Date.now() });
