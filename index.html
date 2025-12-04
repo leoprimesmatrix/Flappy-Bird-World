@@ -5,9 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>FlapTogether</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <!-- Babel for in-browser transpilation -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
       body {
@@ -42,10 +41,13 @@
   }
 }
 </script>
-</head>
+  </head>
   <body class="bg-gray-900 overflow-hidden text-white h-screen w-screen flex items-center justify-center">
     <div id="root" class="w-full h-full flex items-center justify-center"></div>
-    <!-- Removed 'env' preset to prevent transformation to CommonJS 'require' -->
-    <script type="text/babel" data-type="module" data-presets="react,typescript" src="./index.tsx"></script>
+    <!-- 
+      data-presets="react,typescript" is crucial. 
+      We DO NOT use 'env' because it transpiles imports to CommonJS 'require', which breaks browsers.
+    -->
+    <script type="text/babel" data-presets="react,typescript" data-type="module" src="./index.tsx"></script>
   </body>
 </html>

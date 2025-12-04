@@ -3,7 +3,9 @@ import ReactDOM from 'react-dom/client';
 import Peer, { DataConnection } from 'peerjs';
 import { Copy, Play, RotateCcw } from 'lucide-react';
 
-// --- TYPES ---
+// ==========================================
+// TYPES
+// ==========================================
 export type GameStatus = 'MENU' | 'LOBBY' | 'PLAYING' | 'GAME_OVER';
 
 export interface Position {
@@ -37,32 +39,44 @@ export interface GameState {
 
 export type NetworkMessage =
   | { type: 'JOIN'; playerId: string }
-  | { type: 'START_GAME'; seed: number } 
+  | { type: 'START_GAME'; seed: number } // Host sends start
   | { type: 'JUMP'; playerId: string; timestamp: number }
   | { type: 'SYNC'; birds: { [id: string]: BirdState }; pipes: PipeData[]; score: number }
   | { type: 'DIE'; playerId: string; y: number }
   | { type: 'RESTART' };
 
-// --- CONSTANTS ---
+// ==========================================
+// CONSTANTS
+// ==========================================
 export const GRAVITY = 0.45;
 export const JUMP_STRENGTH = -7.5;
 export const PIPE_SPEED = 3.2;
-export const PIPE_SPAWN_RATE = 110; 
+export const PIPE_SPAWN_RATE_MS = 1800; // Converted from 110 frames @ 60fps
 export const PIPE_GAP = 140; 
 export const PIPE_WIDTH = 52;
 export const BIRD_SIZE = 34;
 export const GROUND_HEIGHT = 112;
+
+// Screen dimensions for logic (scaled visually)
 export const GAME_WIDTH = 400; 
 export const GAME_HEIGHT = 600;
+
 export const BIRD_START_X = 80;
 export const BIRD_START_Y = GAME_HEIGHT / 2.5;
 
-// --- PEER SERVICE ---
+export const PEER_CONFIG = {
+  debug: 1,
+};
+
+// ==========================================
+// PEER SERVICE
+// ==========================================
 class PeerService {
   private peer: Peer | null = null;
   private conn: DataConnection | null = null;
   private myId: string = '';
   
+  // Callbacks
   public onConnect?: (partnerId: string) => void;
   public onData?: (data: NetworkMessage) => void;
   public onDisconnect?: () => void;
@@ -148,12 +162,9 @@ class PeerService {
 
 const peerService = new PeerService();
 
-// --- GAME COMPONENTS ---
-
-interface GameCanvasProps {
-  gameState: GameState;
-  myId: string;
-}
+// ==========================================
+// COMPONENTS
+// ==========================================
 
 const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
   return (
@@ -167,14 +178,22 @@ const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
         top: 0,
         zIndex: isMe ? 20 : 10,
         opacity: bird.isDead ? 0.8 : 1,
-        transition: 'transform 0.05s linear',
+        transition: 'transform 0.0s linear', // Removed CSS transition to prevent fighting with high-hz updates
       }}
     >
+      {/* Flappy Style Bird */}
       <div className={`w-full h-full relative ${bird.isDead ? 'grayscale' : ''}`}>
         <div className={`absolute inset-0 rounded-sm border-2 border-black ${bird.color === 'yellow' ? 'bg-[#facc15]' : 'bg-[#ef4444]'}`}></div>
+        
+        {/* White Eye Background */}
         <div className="absolute top-[-4px] right-2 w-4 h-4 bg-white border-2 border-black rounded-full z-10"></div>
+        {/* Pupil */}
         <div className="absolute top-[-2px] right-2 w-1.5 h-1.5 bg-black rounded-full z-20 animate-pulse"></div>
+        
+        {/* Wing */}
         <div className="absolute top-[8px] left-[-2px] w-5 h-3 bg-white border-2 border-black rounded-full z-10 opacity-80"></div>
+        
+        {/* Beak */}
         <div className="absolute bottom-[-2px] right-[-6px] w-4 h-3 bg-[#f97316] border-2 border-black rounded-sm z-10"></div>
         
         {!isMe && (
@@ -186,6 +205,11 @@ const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
     </div>
   );
 };
+
+interface GameCanvasProps {
+  gameState: GameState;
+  myId: string;
+}
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
   const sortedBirds = (Object.values(gameState.birds) as BirdState[]).sort((a, b) => {
@@ -199,11 +223,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
       className="relative overflow-hidden bg-[#70c5ce] shadow-2xl ring-8 ring-black rounded-lg select-none"
       style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
     >
+      {/* City Skyline Background (Parallax Layer) */}
       <div 
         className="absolute bottom-[100px] left-0 w-full opacity-50 pointer-events-none"
         style={{
             height: '200px',
-            backgroundImage: 'linear-gradient(to top, #a3e6af 0%, transparent 100%)',
+            backgroundImage: 'linear-gradient(to top, #a3e6af 0%, transparent 100%)', 
             backgroundRepeat: 'repeat-x'
         }}
       >
@@ -214,8 +239,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         <div className="absolute bottom-0 left-0 w-full h-4 bg-[#5ca66a]"></div>
       </div>
 
+      {/* Pipes */}
       {gameState.pipes.map((pipe) => (
         <React.Fragment key={pipe.id}>
+          {/* Top Pipe */}
           <div
             className="absolute border-x-4 border-b-4 border-black bg-[#73bf2e]"
             style={{
@@ -229,6 +256,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
              <div className="absolute top-0 right-2 w-2 h-full bg-[#9ce659] opacity-40"></div>
           </div>
 
+          {/* Bottom Pipe */}
           <div
             className="absolute border-x-4 border-t-4 border-black bg-[#73bf2e]"
             style={{
@@ -244,6 +272,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </React.Fragment>
       ))}
 
+      {/* Ground */}
       <div 
         className={`absolute bottom-0 w-full z-30 border-t-4 border-black bg-[#ded895] ${gameState.status === 'PLAYING' || gameState.status === 'LOBBY' ? 'animate-ground' : ''} ${gameState.status === 'GAME_OVER' ? 'paused' : ''}`}
         style={{ 
@@ -257,10 +286,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </div>
       </div>
 
+      {/* Birds */}
       {sortedBirds.map((bird) => (
         <Bird key={bird.id} bird={bird} isMe={bird.id === myId} />
       ))}
 
+      {/* Score */}
       {gameState.status !== 'MENU' && (
         <div className="absolute top-16 w-full text-center z-40 pointer-events-none">
             <span className="text-5xl font-bold text-white drop-shadow-[3px_3px_0_#000] stroke-black" style={{ WebkitTextStroke: '2px black' }}>
@@ -269,12 +300,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </div>
       )}
       
+      {/* Messages */}
       {gameState.status === 'LOBBY' && (
         <div className="absolute top-1/3 w-full text-center animate-bounce">
             <span className="text-2xl font-bold text-[#f97316] drop-shadow-[2px_2px_0_#fff] bg-black/50 px-4 py-2 rounded">GET READY!</span>
         </div>
       )}
 
+      {/* Game Over / Waiting Overlay */}
       {gameState.status === 'GAME_OVER' && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20">
             <div className="bg-[#ded895] border-4 border-black p-4 text-center shadow-[8px_8px_0_#000] animate-in zoom-in duration-300">
@@ -293,12 +326,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, myId }) => {
         </div>
       )}
       
+      {/* Flash Effect on Death */}
       <div id="flash-overlay" className="absolute inset-0 bg-white pointer-events-none opacity-0 transition-opacity duration-100"></div>
     </div>
   );
 };
 
-// --- APP ---
+// ==========================================
+// MAIN APP
+// ==========================================
 
 const INITIAL_BIRD: BirdState = {
   id: '',
@@ -317,7 +353,7 @@ const INITIAL_GAME_STATE: GameState = {
   groundX: 0
 };
 
-function App() {
+export default function App() {
   const [myId, setMyId] = useState<string>('');
   const [hostId, setHostId] = useState<string>('');
   const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
@@ -326,11 +362,14 @@ function App() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
+  // Refs for Game Loop
   const stateRef = useRef<GameState>(INITIAL_GAME_STATE);
-  const frameRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const gameLoopRef = useRef<number>(0);
+  const spawnTimerRef = useRef<number>(0);
+  const syncTimerRef = useRef<number>(0);
   
+  // Initialize ID
   useEffect(() => {
     peerService.init().then((id) => {
       setMyId(id);
@@ -373,6 +412,7 @@ function App() {
       peerService.destroy();
       cancelAnimationFrame(gameLoopRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost]);
 
   const updateState = (updater: (prev: GameState) => GameState) => {
@@ -440,6 +480,24 @@ function App() {
   };
 
   const loop = (time: number) => {
+    // Initialize lastTimeRef on first run
+    if (lastTimeRef.current === 0) {
+        lastTimeRef.current = time;
+        gameLoopRef.current = requestAnimationFrame(loop);
+        return;
+    }
+
+    // Delta Time calculation
+    const dt = time - lastTimeRef.current;
+    lastTimeRef.current = time;
+
+    // Cap dt to prevent massive jumps when tab is inactive (e.g. max 100ms)
+    const safeDt = Math.min(dt, 100);
+    
+    // Normalize to 60 FPS (approx 16.67ms per frame)
+    // If screen is 60hz, timeScale ~ 1.
+    // If screen is 120hz, timeScale ~ 0.5.
+    const timeScale = safeDt / (1000 / 60);
     
     if (stateRef.current.status === 'PLAYING') {
         let needsSync = false;
@@ -449,16 +507,25 @@ function App() {
         let nextScore = current.score;
         let nextStatus = current.status;
 
+        // Update Timers
+        if (isHost) {
+            spawnTimerRef.current += safeDt;
+            syncTimerRef.current += safeDt;
+        }
+
+        // 1. Physics
         Object.keys(nextBirds).forEach(key => {
             const bird = nextBirds[key];
             if (!bird.isDead) {
-                bird.velocity += GRAVITY;
-                bird.y += bird.velocity;
+                bird.velocity += GRAVITY * timeScale;
+                bird.y += bird.velocity * timeScale;
                 
+                // Rotation logic
                 if (bird.velocity < 0) {
                     bird.rotation = -25;
                 } else if (bird.velocity > 0) {
-                    bird.rotation += 2;
+                    // Rotate slower based on timeScale
+                    bird.rotation += 2 * timeScale;
                     if (bird.rotation > 90) bird.rotation = 90;
                 }
 
@@ -475,20 +542,24 @@ function App() {
                     bird.velocity = 0;
                 }
             } else {
+                 // Fall to ground if dead in air
                  if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
-                     bird.y += 10;
+                     bird.y += 10 * timeScale;
                      bird.rotation = 90;
                  }
             }
         });
 
-        nextPipes.forEach(p => p.x -= PIPE_SPEED);
+        // 2. Pipes
+        nextPipes.forEach(p => p.x -= PIPE_SPEED * timeScale);
         if (nextPipes.length > 0 && nextPipes[0].x + PIPE_WIDTH < -50) {
             nextPipes.shift();
         }
 
         if (isHost) {
-            if (frameRef.current % PIPE_SPAWN_RATE === 0) {
+            // Spawn based on time accumulation
+            if (spawnTimerRef.current >= PIPE_SPAWN_RATE_MS) {
+                 spawnTimerRef.current -= PIPE_SPAWN_RATE_MS; // Subtract to keep rhythm
                  const minPipeH = 50;
                  const maxPipeH = GAME_HEIGHT - GROUND_HEIGHT - PIPE_GAP - minPipeH;
                  const randomH = Math.floor(Math.random() * (maxPipeH - minPipeH + 1)) + minPipeH;
@@ -500,6 +571,7 @@ function App() {
                  });
                  needsSync = true;
             }
+            // Score
             nextPipes.forEach(p => {
                 if (!p.passed && p.x + PIPE_WIDTH < BIRD_START_X) {
                     p.passed = true;
@@ -509,10 +581,11 @@ function App() {
             });
         }
 
+        // 3. Collisions (Self Check)
         const myBird = nextBirds[myId];
         if (myBird && !myBird.isDead) {
             const birdHitbox = { 
-                t: myBird.y + 8, 
+                t: myBird.y + 8, // Forgive margins
                 b: myBird.y + BIRD_SIZE - 8, 
                 l: BIRD_START_X + 8, 
                 r: BIRD_START_X + BIRD_SIZE - 8 
@@ -529,6 +602,7 @@ function App() {
             }
         }
 
+        // 4. Game Over Check
         const allDead = (Object.values(nextBirds) as BirdState[]).every(b => b.isDead);
         if (allDead) {
             nextStatus = 'GAME_OVER';
@@ -542,17 +616,18 @@ function App() {
             status: nextStatus as GameStatus
         }));
 
-        if (isHost && (needsSync || frameRef.current % 15 === 0)) {
+        // Sync every ~250ms
+        if (isHost && (needsSync || syncTimerRef.current > 250)) {
             sendSync();
+            syncTimerRef.current = 0;
         }
     }
     
-    lastTimeRef.current = time;
-    frameRef.current++;
     gameLoopRef.current = requestAnimationFrame(loop);
   };
 
   const startGameLogic = () => {
+      // Reset
       updateState(prev => {
           const resetBirds: {[id:string]: BirdState} = {};
           Object.keys(prev.birds).forEach(k => {
@@ -572,12 +647,19 @@ function App() {
               birds: resetBirds
           };
       });
-      frameRef.current = 0;
+      
+      // Reset timers
+      spawnTimerRef.current = 0;
+      syncTimerRef.current = 0;
+      lastTimeRef.current = 0; // Will be set on first loop frame
+
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
       gameLoopRef.current = requestAnimationFrame(loop);
   };
 
-  const resetGameLocal = () => {};
+  const resetGameLocal = () => {
+     // Just helper for restart
+  };
 
   const handleRestart = () => {
      if (isHost) {
@@ -591,6 +673,7 @@ function App() {
     const myBird = stateRef.current.birds[myId];
     if (myBird && !myBird.isDead) {
         const birds = { ...stateRef.current.birds };
+        // Jump strength is instantaneous velocity, doesn't need time scaling
         birds[myId].velocity = JUMP_STRENGTH;
         updateState(prev => ({ ...prev, birds }));
         peerService.send({ type: 'JUMP', playerId: myId, timestamp: Date.now() });
@@ -603,6 +686,7 @@ function App() {
       setTimeout(() => setCopied(false), 2000);
   };
 
+  // Input Listeners
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
           if (e.code === 'Space' || e.code === 'ArrowUp') {
@@ -611,6 +695,8 @@ function App() {
           }
       };
       const handleTouch = (e: TouchEvent) => {
+          // e.preventDefault(); // handled in passive listener usually
+          // Only jump if touching canvas area ideally, but fullscreen is fine
           handleJump();
       }
       
@@ -625,12 +711,14 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 w-full relative">
       
+      {/* Background Decor */}
       <div className="absolute inset-0 bg-[#333] z-0 overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gray-500 via-gray-900 to-black"></div>
       </div>
 
       <div className="relative z-10 w-full max-w-2xl flex flex-col items-center gap-6">
         
+        {/* Title */}
         {gameState.status === 'MENU' && (
             <div className="animate-bounce mb-4">
                  <h1 className="text-4xl md:text-6xl text-white font-bold tracking-widest drop-shadow-[4px_4px_0_#000]" 
@@ -640,6 +728,7 @@ function App() {
             </div>
         )}
 
+        {/* MENU */}
         {gameState.status === 'MENU' && (
              <div className="bg-[#ded895] p-6 rounded-lg border-4 border-black shadow-[8px_8px_0_#000] w-full max-w-md">
                 {errorMsg && <div className="bg-red-500 text-white p-2 mb-4 text-xs font-bold border-2 border-black animate-pulse">{errorMsg}</div>}
@@ -681,6 +770,7 @@ function App() {
              </div>
         )}
 
+        {/* LOBBY */}
         {gameState.status === 'LOBBY' && (
              <div className="bg-[#ded895] p-6 rounded-lg border-4 border-black shadow-[8px_8px_0_#000] w-full max-w-md text-center">
                 <h2 className="text-xl font-bold mb-6 text-[#f97316] drop-shadow-[1px_1px_0_#000]">LOBBY</h2>
@@ -729,6 +819,7 @@ function App() {
              </div>
         )}
 
+        {/* GAME CANVAS */}
         {(gameState.status === 'PLAYING' || gameState.status === 'GAME_OVER') && (
             <div className="flex flex-col gap-4 w-full items-center">
                 <GameCanvas gameState={gameState} myId={myId} />
