@@ -46,8 +46,7 @@ export type NetworkMessage =
 export const GRAVITY = 0.45;
 export const JUMP_STRENGTH = -7.5;
 export const PIPE_SPEED = 3.2;
-// Converted 110 frames @ 60fps to MS (approx 1800ms)
-export const PIPE_SPAWN_RATE_MS = 1800; 
+export const PIPE_SPAWN_RATE_MS = 1800; // ~1.8 seconds
 export const PIPE_GAP = 140; 
 export const PIPE_WIDTH = 52;
 export const BIRD_SIZE = 34;
@@ -159,7 +158,8 @@ const Bird: React.FC<{ bird: BirdState; isMe: boolean }> = ({ bird, isMe }) => {
         top: 0,
         zIndex: isMe ? 20 : 10,
         opacity: bird.isDead ? 0.8 : 1,
-        transition: 'transform 0s linear', // Removed transition for instant updates with DT loop
+        // No transition for smooth Delta Time updates
+        transition: 'none', 
       }}
     >
       <div className={`w-full h-full relative ${bird.isDead ? 'grayscale' : ''}`}>
@@ -394,7 +394,7 @@ function App() {
       case 'JUMP':
         if (stateRef.current.birds[msg.playerId]) {
             const birds = { ...stateRef.current.birds };
-            // Ensure deep copy of the specific bird if needed, but shallow copy of map + assign new object is enough
+            // Ensure deep copy of the specific bird
             birds[msg.playerId] = { ...birds[msg.playerId], velocity: JUMP_STRENGTH };
             updateState(prev => ({ ...prev, birds }));
         }
