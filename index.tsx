@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import Peer, { DataConnection } from 'peerjs';
-import { Copy, Play, RotateCcw } from 'lucide-react';
+import { Copy, Play, RotateCcw, Loader2 } from 'lucide-react';
 
 // ==========================================
 // TYPES
@@ -73,10 +73,19 @@ class PeerService {
   constructor() {}
 
   async init(givenId?: string): Promise<string> {
+    if (this.peer && !this.peer.destroyed) {
+      return this.myId;
+    }
+
     return new Promise((resolve, reject) => {
       this.peer = new Peer(givenId || '', { debug: 1 });
 
+      const timeout = setTimeout(() => {
+          reject(new Error("Connection timed out. Check internet or Adblock."));
+      }, 10000);
+
       this.peer.on('open', (id) => {
+        clearTimeout(timeout);
         this.myId = id;
         resolve(id);
       });
@@ -86,8 +95,9 @@ class PeerService {
       });
 
       this.peer.on('error', (err) => {
+        clearTimeout(timeout);
         console.error('Peer error:', err);
-        // Don't reject immediately on error during runtime, only init
+        // If we haven't initialized yet, reject
         if (!this.myId) reject(err);
       });
       
@@ -138,6 +148,9 @@ class PeerService {
   destroy() {
     if (this.conn) this.conn.close();
     if (this.peer) this.peer.destroy();
+    this.peer = null;
+    this.conn = null;
+    this.myId = '';
   }
 }
 
@@ -315,6 +328,7 @@ const INITIAL_GAME_STATE: GameState = {
 
 function App() {
   const [myId, setMyId] = useState<string>('');
+  const [loadingId, setLoadingId] = useState(true);
   const [hostId, setHostId] = useState<string>('');
   const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
@@ -324,30 +338,49 @@ function App() {
 
   // Refs for Game Loop
   const stateRef = useRef<GameState>(INITIAL_GAME_STATE);
-  const isHostRef = useRef(false); // Critical: Ref for loop access to host status
+  const isHostRef = useRef(false); 
   const lastTimeRef = useRef<number>(0);
   const gameLoopRef = useRef<number>(0);
   const spawnTimerRef = useRef<number>(0);
   const syncTimerRef = useRef<number>(0);
   
-  // Sync isHost state to Ref
   useEffect(() => {
     isHostRef.current = isHost;
   }, [isHost]);
 
-  // Initialize Peer
+  // One-time Peer Init
   useEffect(() => {
+    setLoadingId(true);
     peerService.init().then((id) => {
       setMyId(id);
+      setLoadingId(false);
       updateState(prev => ({
         ...prev,
         birds: { [id]: { ...INITIAL_BIRD, id, color: 'yellow' } }
       }));
     }).catch(err => {
         console.error("Peer Init Error", err);
-        setErrorMsg("Connection failed.");
+        setErrorMsg("Connection failed. Check network/Adblock.");
+        setLoadingId(false);
     });
 
+    peerService.onData = handleNetworkMessage;
+    
+    peerService.onDisconnect = () => {
+        setConnectedPeer(null);
+        setErrorMsg("Partner disconnected.");
+        setGameState(prev => ({ ...prev, status: 'MENU' }));
+        cancelAnimationFrame(gameLoopRef.current);
+    };
+
+    return () => {
+      peerService.destroy();
+      cancelAnimationFrame(gameLoopRef.current);
+    };
+  }, []);
+
+  // Update Callbacks when Host state changes (Don't Re-init peer)
+  useEffect(() => {
     peerService.onConnect = (partnerId) => {
       setConnectedPeer(partnerId);
       if (isHost) {
@@ -364,21 +397,6 @@ function App() {
         setGameState(prev => ({ ...prev, status: 'LOBBY' }));
       }
     };
-
-    peerService.onData = handleNetworkMessage;
-    
-    peerService.onDisconnect = () => {
-        setConnectedPeer(null);
-        setErrorMsg("Partner disconnected.");
-        setGameState(prev => ({ ...prev, status: 'MENU' }));
-        cancelAnimationFrame(gameLoopRef.current);
-    };
-
-    return () => {
-      peerService.destroy();
-      cancelAnimationFrame(gameLoopRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost]);
 
   const updateState = (updater: (prev: GameState) => GameState) => {
@@ -459,7 +477,6 @@ function App() {
     const safeDt = Math.min(dt, 100);
     const timeScale = safeDt / 16.66;
     
-    // Check status directly from ref
     if (stateRef.current.status === 'PLAYING') {
         let needsSync = false;
         const current = stateRef.current;
@@ -473,7 +490,6 @@ function App() {
         let nextScore = current.score;
         let nextStatus = current.status;
 
-        // Use isHostRef to avoid stale closures
         if (isHostRef.current) {
             spawnTimerRef.current += safeDt;
             syncTimerRef.current += safeDt;
@@ -521,7 +537,6 @@ function App() {
 
         // 3. Spawning & Score (Host Only)
         if (isHostRef.current) {
-            // Subtracting interval instead of resetting to 0 for smoother cadence
             if (spawnTimerRef.current >= PIPE_SPAWN_RATE_MS) {
                  spawnTimerRef.current -= PIPE_SPAWN_RATE_MS; 
                  const minPipeH = 50;
@@ -687,9 +702,10 @@ function App() {
                 <div className="flex flex-col gap-4">
                     <button 
                         onClick={() => { setIsHost(true); setGameState(p => ({...p, status: 'LOBBY'})); }}
-                        className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all"
+                        className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50"
+                        disabled={loadingId}
                     >
-                        <Play size={20} /> CREATE GAME
+                         {loadingId ? <Loader2 className="animate-spin" /> : <Play size={20} />} CREATE GAME
                     </button>
                     
                     <div className="relative flex py-2 items-center">
@@ -701,14 +717,16 @@ function App() {
                     <form onSubmit={(e) => { e.preventDefault(); if(hostId) { setIsHost(false); peerService.connect(hostId); } }} className="flex gap-2">
                         <input 
                             type="text" 
-                            placeholder="PASTE ID HERE"
+                            placeholder={loadingId ? "LOADING..." : "PASTE ID HERE"}
                             value={hostId}
                             onChange={e => setHostId(e.target.value)}
-                            className="flex-1 bg-white border-4 border-black p-2 outline-none font-mono uppercase text-sm placeholder-gray-400"
+                            disabled={loadingId}
+                            className="flex-1 bg-white border-4 border-black p-2 outline-none font-mono uppercase text-sm placeholder-gray-400 text-black"
                         />
                         <button 
                             type="submit"
-                            className="bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold px-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all"
+                            className="bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold px-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50"
+                            disabled={loadingId}
                         >
                             JOIN
                         </button>
@@ -716,7 +734,7 @@ function App() {
                 </div>
                 
                 <div className="mt-6 text-center text-[10px] text-black/60">
-                    ID: <span className="font-mono bg-white border border-black px-1">{myId || '...'}</span>
+                    ID: <span className="font-mono bg-white border border-black px-1 text-black">{loadingId ? '...' : (myId || 'ERROR')}</span>
                 </div>
              </div>
         )}
@@ -727,14 +745,14 @@ function App() {
                 <div className="flex justify-center gap-8 mb-8">
                     <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-[#facc15] border-4 border-black mb-2 animate-bounce rounded-sm"></div>
-                        <span className="font-bold text-xs">YOU</span>
+                        <span className="font-bold text-xs text-black">YOU</span>
                     </div>
                     <div className="flex items-center">
                         <div className="text-2xl font-bold animate-pulse text-black/50">VS</div>
                     </div>
                     <div className="flex flex-col items-center">
                         <div className={`w-12 h-12 border-4 border-black mb-2 rounded-sm transition-colors ${connectedPeer ? 'bg-[#ef4444] animate-bounce' : 'bg-gray-300'}`}></div>
-                        <span className="font-bold text-xs">{connectedPeer ? 'P2' : '...'}</span>
+                        <span className="font-bold text-xs text-black">{connectedPeer ? 'P2' : '...'}</span>
                     </div>
                 </div>
 
@@ -744,9 +762,9 @@ function App() {
                             <div className="bg-white border-4 border-black p-3 mb-2 flex flex-col gap-2">
                                 <span className="text-[10px] text-gray-500 font-bold uppercase">Share this ID</span>
                                 <div className="flex items-center gap-2">
-                                    <code className="flex-1 text-xs font-mono bg-gray-100 p-1 truncate select-all">{myId}</code>
+                                    <code className="flex-1 text-xs font-mono bg-gray-100 p-1 truncate select-all text-black">{myId}</code>
                                     <button onClick={handleCopy} className={`p-1 border-2 border-black hover:bg-gray-100 ${copied ? 'bg-green-200' : ''}`}>
-                                        <Copy size={14} />
+                                        <Copy size={14} className="text-black" />
                                     </button>
                                 </div>
                             </div>
