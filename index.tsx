@@ -313,7 +313,7 @@ const INITIAL_GAME_STATE: GameState = {
   groundX: 0
 };
 
-export default function App() {
+function App() {
   const [myId, setMyId] = useState<string>('');
   const [hostId, setHostId] = useState<string>('');
   const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
@@ -795,3 +795,10 @@ export default function App() {
     </div>
   );
 }
+
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
