@@ -1,0 +1,5 @@
+{
+  "name": "FlapTogether",
+  "description": "A polished, multiplayer Flappy Bird clone where you can play with a friend in real-time using P2P connection.",
+  "requestFramePermissions": []
+}
