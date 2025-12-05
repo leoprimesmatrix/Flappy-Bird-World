@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import Peer, { DataConnection } from 'peerjs';
@@ -7,7 +6,7 @@ import { Copy, Play, RotateCcw, Loader2 } from 'lucide-react';
 // ==========================================
 // TYPES
 // ==========================================
-export type GameStatus = 'MENU' | 'LOBBY' | 'PLAYING' | 'GAME_OVER';
+export type GameStatus = 'MENU' | 'LOBBY' | 'COUNTDOWN' | 'PLAYING' | 'GAME_OVER';
 
 export interface BirdState {
   id: string;
@@ -33,18 +32,18 @@ export interface GameState {
 
 export type NetworkMessage =
   | { type: 'JOIN'; playerId: string }
-  | { type: 'START_GAME'; seed: number } 
-  | { type: 'JUMP'; playerId: string; timestamp: number }
-  | { type: 'SYNC'; birds: { [id: string]: BirdState }; pipes: PipeData[]; score: number }
-  | { type: 'DIE'; playerId: string; y: number }
-  | { type: 'RESTART' };
+  | { type: 'START_REQ' }
+  | { type: 'RESTART' }
+  | { type: 'PLAYER_UPDATE'; id: string; y: number; velocity: number; rotation: number; isDead: boolean }
+  | { type: 'PIPE_SYNC'; pipes: PipeData[]; score: number }
+  | { type: 'DIE'; playerId: string; y: number };
 
 // ==========================================
 // CONSTANTS
 // ==========================================
 export const GRAVITY = 0.45;
 export const JUMP_STRENGTH = -7.5;
-export const PIPE_SPEED = 3.2; // Pixels per frame (at 60fps baseline)
+export const PIPE_SPEED = 3.2; 
 export const PIPE_SPAWN_RATE_MS = 1600; 
 export const PIPE_GAP = 140; 
 export const PIPE_WIDTH = 52;
@@ -96,7 +95,6 @@ class PeerService {
       this.peer.on('error', (err) => {
         clearTimeout(timeout);
         console.error('Peer error:', err);
-        // If we haven't initialized yet, reject
         if (!this.myId) reject(err);
       });
       
@@ -166,7 +164,8 @@ const INITIAL_BIRD: BirdState = {
 
 export default function App() {
   const [status, setStatus] = useState<GameStatus>('MENU');
-  const [score, setScore] = useState(0); // Only for UI display
+  const [score, setScore] = useState(0); 
+  const [countdown, setCountdown] = useState(0);
   
   const [myId, setMyId] = useState<string>('');
   const [loadingId, setLoadingId] = useState(true);
@@ -176,7 +175,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
-  // MUTEABLE GAME STATE (Refs) - This runs outside React render cycle
+  // MUTEABLE GAME STATE (Refs)
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameStateRef = useRef<GameState>({
     score: 0,
@@ -196,7 +195,7 @@ export default function App() {
   const statusRef = useRef<GameStatus>('MENU');
   const myIdRef = useRef('');
 
-  // Sync refs with state/props
+  // Sync refs with state
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { statusRef.current = status; }, [status]);
   useEffect(() => { myIdRef.current = myId; }, [myId]);
@@ -234,9 +233,7 @@ export default function App() {
     peerService.onConnect = (partnerId) => {
       setConnectedPeer(partnerId);
       if (isHost) {
-          // setStatus('LOBBY'); // Already in lobby
           gameStateRef.current.birds[partnerId] = { ...INITIAL_BIRD, id: partnerId, color: 'red' };
-          setTimeout(() => sendSync(), 200);
       } else {
         setStatus('LOBBY');
       }
@@ -250,53 +247,125 @@ export default function App() {
     const current = gameStateRef.current;
     
     switch (msg.type) {
-      case 'JUMP':
-        if (current.birds[msg.playerId]) {
-            current.birds[msg.playerId].velocity = JUMP_STRENGTH;
+      case 'PLAYER_UPDATE':
+        // Update the remote bird with authoritative data
+        if (current.birds[msg.id]) {
+            const b = current.birds[msg.id];
+            // Smoothly interpolate or snap? Snapping is safer for "Flying Nowhere" bugs
+            // but we can lerp y for smoothness if needed. For now, strict snap prevents desync.
+            b.y = msg.y;
+            b.velocity = msg.velocity;
+            b.rotation = msg.rotation;
+            b.isDead = msg.isDead;
+        } else {
+            // If bird doesn't exist yet (late join sync), create it
+            current.birds[msg.id] = {
+                id: msg.id,
+                y: msg.y,
+                velocity: msg.velocity,
+                isDead: msg.isDead,
+                rotation: msg.rotation,
+                color: isHostRef.current ? 'red' : 'yellow' // Color logic might vary but OK for now
+            };
         }
         break;
-      case 'SYNC':
+        
+      case 'PIPE_SYNC':
+        // Guest receives pipes from Host
         if (!isHostRef.current) {
-            current.birds = msg.birds;
             current.pipes = msg.pipes;
             current.score = msg.score;
-            setScore(msg.score); // Sync UI score
-            // If we are in menu/lobby and get sync, switch to playing
-            if (statusRef.current === 'MENU' || statusRef.current === 'LOBBY') {
-               setStatus('PLAYING');
-            }
+            setScore(msg.score);
         }
         break;
-      case 'START_GAME':
-        startGameLogic();
+
+      case 'START_REQ':
+        // Guest requested start (if we add that feature), or Host broadcast start
+        if (!isHostRef.current) startCountdownSequence();
         break;
+
       case 'RESTART':
-        startGameLogic();
+        startCountdownSequence();
         break;
+
       case 'DIE':
+        // Backup death event just in case
         if (current.birds[msg.playerId]) {
-            const b = current.birds[msg.playerId];
-            if (!b.isDead) {
-                b.isDead = true;
-                b.y = msg.y;
-            }
+            current.birds[msg.playerId].isDead = true;
+            current.birds[msg.playerId].y = msg.y;
         }
         break;
     }
   };
 
-  const sendSync = () => {
+  const sendPlayerUpdate = () => {
+      if (!connectedPeer) return;
+      const myBird = gameStateRef.current.birds[myIdRef.current];
+      if (!myBird) return;
+      
+      peerService.send({
+          type: 'PLAYER_UPDATE',
+          id: myIdRef.current,
+          y: myBird.y,
+          velocity: myBird.velocity,
+          rotation: myBird.rotation,
+          isDead: myBird.isDead
+      });
+  };
+
+  const sendPipeSync = () => {
       if (!connectedPeer) return;
       peerService.send({
-          type: 'SYNC',
-          birds: gameStateRef.current.birds,
+          type: 'PIPE_SYNC',
           pipes: gameStateRef.current.pipes,
           score: gameStateRef.current.score
       });
   };
 
   // ==========================================
-  // GAME LOOP (CANVAS)
+  // GAME LOGIC
+  // ==========================================
+  
+  const startCountdownSequence = () => {
+      // 1. Reset Game State
+      const current = gameStateRef.current;
+      current.score = 0;
+      current.pipes = [];
+      Object.keys(current.birds).forEach(k => {
+          current.birds[k].y = BIRD_START_Y;
+          current.birds[k].velocity = 0;
+          current.birds[k].rotation = 0;
+          current.birds[k].isDead = false;
+      });
+      setScore(0);
+      spawnTimerRef.current = 0;
+      lastTimeRef.current = 0;
+      
+      // 2. Start Countdown UI
+      setStatus('COUNTDOWN');
+      setCountdown(3);
+      
+      let count = 3;
+      const interval = setInterval(() => {
+          count--;
+          if (count > 0) {
+              setCountdown(count);
+          } else {
+              clearInterval(interval);
+              setStatus('PLAYING');
+          }
+      }, 1000);
+  };
+
+  const handleStartGame = () => {
+      if (isHost) {
+          peerService.send({ type: 'RESTART' }); // Use RESTART type for both start/restart
+          startCountdownSequence();
+      }
+  };
+
+  // ==========================================
+  // GAME LOOP
   // ==========================================
   const loop = (time: number) => {
     if (lastTimeRef.current === 0) {
@@ -308,9 +377,8 @@ export default function App() {
     const dt = time - lastTimeRef.current;
     lastTimeRef.current = time;
     
-    // Cap dt to prevent huge jumps if tab inactive
     const safeDt = Math.min(dt, 100);
-    const timeScale = safeDt / 16.66; // 1.0 at 60fps
+    const timeScale = safeDt / 16.66; 
 
     update(safeDt, timeScale);
     draw();
@@ -319,79 +387,18 @@ export default function App() {
   };
 
   const update = (dt: number, timeScale: number) => {
-    if (statusRef.current !== 'PLAYING') {
-        // Just animate ground even if not playing
-        if (statusRef.current === 'LOBBY' || statusRef.current === 'MENU') {
-            groundXRef.current = (groundXRef.current - (PIPE_SPEED * timeScale)) % 24;
-        }
-        return;
+    // animate ground in lobby/countdown/playing
+    if (statusRef.current === 'LOBBY' || statusRef.current === 'MENU' || statusRef.current === 'COUNTDOWN' || statusRef.current === 'PLAYING') {
+         groundXRef.current = (groundXRef.current - (PIPE_SPEED * timeScale)) % 24;
     }
+
+    if (statusRef.current !== 'PLAYING') return;
 
     const current = gameStateRef.current;
-    let needsSync = false;
-
-    // 1. Ground Scroll
-    groundXRef.current = (groundXRef.current - (PIPE_SPEED * timeScale)) % 24;
-
-    // 2. Physics & Logic
+    
+    // -- HOST ONLY: Pipe Spawning --
     if (isHostRef.current) {
         spawnTimerRef.current += dt;
-        syncTimerRef.current += dt;
-    }
-
-    // Birds
-    const myId = myIdRef.current;
-    const myBird = current.birds[myId];
-
-    (Object.values(current.birds) as BirdState[]).forEach(bird => {
-        if (!bird.isDead) {
-            bird.velocity += GRAVITY * timeScale;
-            bird.y += bird.velocity * timeScale;
-
-            // Rotation
-            if (bird.velocity < 0) {
-                bird.rotation = -25;
-            } else if (bird.velocity > 0) {
-                bird.rotation += 2 * timeScale;
-                if (bird.rotation > 90) bird.rotation = 90;
-            }
-
-            // Ground Hit
-            if (bird.y + BIRD_SIZE >= GAME_HEIGHT - GROUND_HEIGHT) {
-                bird.y = GAME_HEIGHT - GROUND_HEIGHT - BIRD_SIZE;
-                bird.isDead = true;
-                if (bird.id === myId) {
-                    triggerFlash();
-                    peerService.send({ type: 'DIE', playerId: myId, y: bird.y });
-                }
-            }
-            // Ceiling Hit
-            if (bird.y < 0) {
-                bird.y = 0;
-                bird.velocity = 0;
-            }
-        } else {
-            // Dead Fall
-            if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
-                bird.y += 10 * timeScale;
-                bird.rotation = 90;
-            }
-        }
-    });
-
-    // Pipes
-    for (let i = current.pipes.length - 1; i >= 0; i--) {
-        const p = current.pipes[i];
-        p.x -= PIPE_SPEED * timeScale;
-        
-        // Remove offscreen
-        if (p.x + PIPE_WIDTH < -100) {
-            current.pipes.splice(i, 1);
-        }
-    }
-
-    // Host: Spawning & Scoring
-    if (isHostRef.current) {
         if (spawnTimerRef.current >= PIPE_SPAWN_RATE_MS) {
             spawnTimerRef.current -= PIPE_SPAWN_RATE_MS;
             const minPipeH = 50;
@@ -403,49 +410,133 @@ export default function App() {
                 topHeight: randomH,
                 passed: false
             });
-            needsSync = true;
+            // Send sync immediately on spawn to ensure guest gets it
+            sendPipeSync();
         }
+    }
 
+    // -- ALL: Pipe Movement --
+    // Both move pipes locally for smoothness.
+    // Guest will snap to Host positions when PIPE_SYNC arrives.
+    for (let i = current.pipes.length - 1; i >= 0; i--) {
+        const p = current.pipes[i];
+        p.x -= PIPE_SPEED * timeScale;
+        
+        if (p.x + PIPE_WIDTH < -100) {
+            current.pipes.splice(i, 1);
+        }
+    }
+
+    // -- HOST ONLY: Scoring --
+    if (isHostRef.current) {
+        let scoreChanged = false;
         current.pipes.forEach(p => {
             if (!p.passed && p.x + PIPE_WIDTH < BIRD_START_X) {
                 p.passed = true;
                 current.score += 1;
-                setScore(current.score); // Update UI
-                needsSync = true;
+                scoreChanged = true;
             }
         });
+        if (scoreChanged) {
+            setScore(current.score);
+            sendPipeSync();
+        }
     }
 
-    // Collision (Self only)
-    if (myBird && !myBird.isDead) {
-        const hitbox = {
-            t: myBird.y + 8,
-            b: myBird.y + BIRD_SIZE - 8,
-            l: BIRD_START_X + 8,
-            r: BIRD_START_X + BIRD_SIZE - 8
-        };
+    // -- ALL: Physics (Authoritative Self, Interpolated Remote) --
+    
+    // 1. My Bird Logic
+    const myBird = current.birds[myIdRef.current];
+    if (myBird) {
+        if (!myBird.isDead) {
+            myBird.velocity += GRAVITY * timeScale;
+            myBird.y += myBird.velocity * timeScale;
 
-        for (const p of current.pipes) {
-            if (hitbox.r > p.x && hitbox.l < p.x + PIPE_WIDTH) {
-                if (hitbox.t < p.topHeight || hitbox.b > p.topHeight + PIPE_GAP) {
-                    myBird.isDead = true;
-                    triggerFlash();
-                    peerService.send({ type: 'DIE', playerId: myId, y: myBird.y });
+            // Rotation
+            if (myBird.velocity < 0) {
+                myBird.rotation = -25;
+            } else if (myBird.velocity > 0) {
+                myBird.rotation += 2 * timeScale;
+                if (myBird.rotation > 90) myBird.rotation = 90;
+            }
+
+            // Boundaries
+            if (myBird.y + BIRD_SIZE >= GAME_HEIGHT - GROUND_HEIGHT) {
+                myBird.y = GAME_HEIGHT - GROUND_HEIGHT - BIRD_SIZE;
+                myBird.isDead = true;
+                triggerFlash();
+            }
+            if (myBird.y < 0) {
+                myBird.y = 0;
+                myBird.velocity = 0;
+            }
+            
+            // Pipe Collision
+            const hitbox = {
+                t: myBird.y + 8,
+                b: myBird.y + BIRD_SIZE - 8,
+                l: BIRD_START_X + 8,
+                r: BIRD_START_X + BIRD_SIZE - 8
+            };
+
+            for (const p of current.pipes) {
+                if (hitbox.r > p.x && hitbox.l < p.x + PIPE_WIDTH) {
+                    if (hitbox.t < p.topHeight || hitbox.b > p.topHeight + PIPE_GAP) {
+                        myBird.isDead = true;
+                        triggerFlash();
+                    }
                 }
             }
+        } else {
+             // Dead Fall
+             if (myBird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
+                myBird.y += 10 * timeScale;
+                myBird.rotation = 90;
+             }
         }
+    }
+
+    // 2. Remote Birds Logic (Simulate Gravity/Fall for smoothness between updates)
+    (Object.values(current.birds) as BirdState[]).forEach(bird => {
+        if (bird.id !== myIdRef.current) {
+            if (!bird.isDead) {
+                // Apply simple gravity prediction
+                bird.velocity += GRAVITY * timeScale;
+                bird.y += bird.velocity * timeScale;
+                 // Rotation
+                if (bird.velocity < 0) {
+                    bird.rotation = -25;
+                } else if (bird.velocity > 0) {
+                    bird.rotation += 2 * timeScale;
+                    if (bird.rotation > 90) bird.rotation = 90;
+                }
+            } else {
+                 if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
+                    bird.y += 10 * timeScale;
+                    bird.rotation = 90;
+                 }
+            }
+        }
+    });
+
+    // -- SYNC TIMERS --
+    // Send my updates frequently
+    syncTimerRef.current += dt;
+    if (syncTimerRef.current > 45) { // ~20 times per second
+        sendPlayerUpdate();
+        
+        // Host also syncs pipes periodically to correct drift
+        if (isHostRef.current) {
+            sendPipeSync();
+        }
+        
+        syncTimerRef.current = 0;
     }
 
     // Game Over Check
     const allDead = (Object.values(current.birds) as BirdState[]).every(b => b.isDead);
     if (allDead && Object.values(current.birds).length > 0) {
         setStatus('GAME_OVER');
-    }
-
-    // Sync
-    if (isHostRef.current && (needsSync || syncTimerRef.current > 200)) {
-        sendSync();
-        if (syncTimerRef.current > 200) syncTimerRef.current = 0;
     }
   };
 
@@ -456,64 +547,43 @@ export default function App() {
       if (!ctx) return;
 
       const current = gameStateRef.current;
-
-      // Clear
       ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-      // --- 1. Background (Solid + Gradient for sky) ---
-      // We rely on CSS for the fancy city parallax behind the canvas to save draw calls,
-      // but we need to ensure the canvas is transparent where needed.
-      // However, to make it look robust, let's draw the basic sky if CSS fails or for consistency.
-      // Actually, transparency is better for the parallax effect. 
-      // ctx.fillStyle = '#70c5ce'; 
-      // ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-      // --- 2. Pipes ---
+      // --- 1. Pipes ---
       current.pipes.forEach(p => {
-          // Top Pipe
           ctx.fillStyle = '#73bf2e';
           ctx.strokeStyle = '#000';
           ctx.lineWidth = 4;
           
-          // Body
+          // Top
           ctx.fillRect(p.x, 0, PIPE_WIDTH, p.topHeight);
-          ctx.strokeRect(p.x, -4, PIPE_WIDTH, p.topHeight + 4); // -4 to hide top border
-          
-          // Cap
+          ctx.strokeRect(p.x, -4, PIPE_WIDTH, p.topHeight + 4); 
           ctx.strokeRect(p.x - 4, p.topHeight - 32, PIPE_WIDTH + 8, 32);
           ctx.fillRect(p.x - 2, p.topHeight - 30, PIPE_WIDTH + 4, 28);
-          
-          // Highlights
+          // Highlight
           ctx.fillStyle = '#9ce659';
           ctx.globalAlpha = 0.3;
           ctx.fillRect(p.x + PIPE_WIDTH - 10, 0, 6, p.topHeight);
           ctx.globalAlpha = 1.0;
 
-          // Bottom Pipe
+          // Bottom
           const bottomPipeY = p.topHeight + PIPE_GAP;
           const bottomPipeH = GAME_HEIGHT - GROUND_HEIGHT - bottomPipeY;
-          
           ctx.fillStyle = '#73bf2e';
-          // Body
           ctx.fillRect(p.x, bottomPipeY, PIPE_WIDTH, bottomPipeH);
           ctx.strokeRect(p.x, bottomPipeY, PIPE_WIDTH, bottomPipeH + 4); 
-
-          // Cap
           ctx.strokeRect(p.x - 4, bottomPipeY, PIPE_WIDTH + 8, 32);
           ctx.fillRect(p.x - 2, bottomPipeY + 2, PIPE_WIDTH + 4, 28);
-
-          // Highlights
+          // Highlight
           ctx.fillStyle = '#9ce659';
           ctx.globalAlpha = 0.3;
           ctx.fillRect(p.x + PIPE_WIDTH - 10, bottomPipeY, 6, bottomPipeH);
           ctx.globalAlpha = 1.0;
       });
 
-      // --- 3. Ground ---
+      // --- 2. Ground ---
       const gx = groundXRef.current;
       const gy = GAME_HEIGHT - GROUND_HEIGHT;
-      
-      // Ground Top Border
       ctx.fillStyle = '#ded895';
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 4;
@@ -532,8 +602,6 @@ export default function App() {
       ctx.beginPath();
       ctx.rect(0, gy + 16, GAME_WIDTH, GROUND_HEIGHT - 16);
       ctx.clip();
-      
-      // Draw diagonal stripes
       ctx.strokeStyle = '#d0c874';
       ctx.lineWidth = 12;
       for (let i = -24; i < GAME_WIDTH + 24; i += 24) {
@@ -544,9 +612,8 @@ export default function App() {
       }
       ctx.restore();
 
-      // --- 4. Birds ---
+      // --- 3. Birds ---
       const myId = myIdRef.current;
-      // Sort birds so mine is on top
       const sortedBirds = (Object.values(current.birds) as BirdState[]).sort((a, b) => {
           if (a.id === myId) return 1;
           if (b.id === myId) return -1;
@@ -564,34 +631,37 @@ export default function App() {
           const w = BIRD_SIZE;
           const h = BIRD_SIZE * 0.7;
 
-          // Bird Body
-          ctx.fillStyle = bird.isDead ? '#999' : (bird.color === 'yellow' ? '#facc15' : '#ef4444');
+          // Color
+          const isMe = bird.id === myId;
+          const isYellow = isMe ? (isHostRef.current ? true : false) : (isHostRef.current ? false : true); 
+          // Simplified: Host always yellow? No, Host is self, Guest is self. 
+          // Let's stick to: My bird = yellow, Enemy = red for visibility.
+          const colorHex = isMe ? '#facc15' : '#ef4444';
+          
+          ctx.fillStyle = bird.isDead ? '#999' : colorHex;
           ctx.strokeStyle = '#000';
           ctx.lineWidth = 2;
           
-          // Draw rect body with rounded feel
           ctx.fillRect(x, y, w, h);
           ctx.strokeRect(x, y, w, h);
 
-          // Eye (White)
+          // Eye
           ctx.fillStyle = '#fff';
           ctx.beginPath();
           ctx.arc(x + w - 8, y + 4, 8, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
-
-          // Pupil (Black)
           ctx.fillStyle = '#000';
           ctx.beginPath();
           ctx.arc(x + w - 6, y + 4, 2, 0, Math.PI * 2);
           ctx.fill();
 
-          // Beak (Orange)
+          // Beak
           ctx.fillStyle = '#f97316';
           ctx.fillRect(x + w - 4, y + 10, 8, 8);
           ctx.strokeRect(x + w - 4, y + 10, 8, 8);
 
-          // Wing (White)
+          // Wing
           ctx.fillStyle = '#fff';
           ctx.globalAlpha = 0.8;
           ctx.beginPath();
@@ -600,19 +670,17 @@ export default function App() {
           ctx.stroke();
           ctx.globalAlpha = 1.0;
 
-          // P2 Label
-          if (bird.id !== myId) {
+          if (!isMe) {
              ctx.fillStyle = '#fff';
              ctx.font = 'bold 10px sans-serif';
              ctx.fillText('P2', x + 10, y - 10);
           }
-
           ctx.restore();
       });
   };
 
   // ==========================================
-  // INPUT & CONTROLS
+  // INPUT
   // ==========================================
   const triggerFlash = () => {
     const flashEl = document.getElementById('flash-overlay');
@@ -627,33 +695,14 @@ export default function App() {
     const myBird = gameStateRef.current.birds[myIdRef.current];
     if (myBird && !myBird.isDead) {
         myBird.velocity = JUMP_STRENGTH;
-        peerService.send({ type: 'JUMP', playerId: myIdRef.current, timestamp: Date.now() });
+        // Immediate send for responsiveness, though loop will send periodic updates too
+        sendPlayerUpdate();
     }
   }, []);
 
-  const startGameLogic = () => {
-    // Reset State
-    const current = gameStateRef.current;
-    current.score = 0;
-    current.pipes = [];
-    Object.keys(current.birds).forEach(k => {
-        current.birds[k].y = BIRD_START_Y;
-        current.birds[k].velocity = 0;
-        current.birds[k].rotation = 0;
-        current.birds[k].isDead = false;
-    });
-
-    setScore(0);
-    setStatus('PLAYING');
-    
-    spawnTimerRef.current = 0;
-    lastTimeRef.current = 0;
-  };
-
   const handleRestart = () => {
     if (isHost) {
-        peerService.send({ type: 'RESTART' });
-        startGameLogic();
+        handleStartGame();
     }
   };
 
@@ -663,13 +712,12 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Start Loop on Mount
+  // Start Loop
   useEffect(() => {
     gameLoopIdRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(gameLoopIdRef.current);
   }, []);
 
-  // Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.code === 'Space' || e.code === 'ArrowUp') {
@@ -686,12 +734,10 @@ export default function App() {
          onTouchStart={handleJump} 
          onMouseDown={handleJump}>
       
-      {/* CSS Background (Parallax Layer) */}
+      {/* Background Parallax */}
       <div className="absolute inset-0 z-0 bg-[#70c5ce]">
          <div className="absolute bottom-[100px] left-0 w-full opacity-50 h-[200px]"
-              style={{
-                backgroundImage: 'linear-gradient(to top, #a3e6af 0%, transparent 100%)'
-              }}>
+              style={{ backgroundImage: 'linear-gradient(to top, #a3e6af 0%, transparent 100%)' }}>
             <div className="absolute bottom-0 left-10 w-10 h-32 bg-[#a3e6af] border-t-4 border-x-4 border-[#5ca66a]"></div>
             <div className="absolute bottom-0 left-60 w-8 h-40 bg-[#a3e6af] border-t-4 border-x-4 border-[#5ca66a]"></div>
             <div className="absolute bottom-0 left-80 w-16 h-24 bg-[#a3e6af] border-t-4 border-x-4 border-[#5ca66a]"></div>
@@ -787,7 +833,7 @@ export default function App() {
                             </div>
                          )}
                         <button 
-                            onClick={() => { peerService.send({ type: 'START_GAME', seed: Date.now() }); startGameLogic(); }}
+                            onClick={handleStartGame}
                             className="bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold py-4 w-full border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
                             disabled={!connectedPeer}
                         >
@@ -802,8 +848,17 @@ export default function App() {
              </div>
         )}
 
+        {/* COUNTDOWN UI */}
+        {status === 'COUNTDOWN' && (
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 text-center animate-in zoom-in duration-300">
+                <div className="text-8xl font-black text-white stroke-black drop-shadow-[4px_4px_0_#000]" style={{ WebkitTextStroke: '3px black' }}>
+                    {countdown}
+                </div>
+            </div>
+        )}
+
         {/* SCORE DISPLAY */}
-        {status === 'PLAYING' && (
+        {(status === 'PLAYING' || status === 'COUNTDOWN') && (
             <div className="absolute top-16 w-full text-center z-40 pointer-events-none">
                 <span className="text-5xl font-bold text-white drop-shadow-[3px_3px_0_#000] stroke-black" style={{ WebkitTextStroke: '2px black' }}>
                 {score}
