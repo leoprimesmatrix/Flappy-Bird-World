@@ -1,7 +1,8 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import Peer, { DataConnection } from 'peerjs';
-import { Copy, Play, RotateCcw, Loader2 } from 'lucide-react';
+import { Copy, Play, RotateCcw, Loader2, AlertTriangle, X } from 'lucide-react';
 
 // ==========================================
 // TYPES
@@ -174,6 +175,8 @@ export default function App() {
   const [isHost, setIsHost] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  
+  const [showDisclaimer, setShowDisclaimer] = useState(true);
 
   // MUTEABLE GAME STATE (Refs)
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -249,23 +252,22 @@ export default function App() {
     switch (msg.type) {
       case 'PLAYER_UPDATE':
         // Update the remote bird with authoritative data
+        // We do NOT simulate gravity for remote birds to avoid desync
         if (current.birds[msg.id]) {
             const b = current.birds[msg.id];
-            // Smoothly interpolate or snap? Snapping is safer for "Flying Nowhere" bugs
-            // but we can lerp y for smoothness if needed. For now, strict snap prevents desync.
             b.y = msg.y;
             b.velocity = msg.velocity;
             b.rotation = msg.rotation;
             b.isDead = msg.isDead;
         } else {
-            // If bird doesn't exist yet (late join sync), create it
+            // New bird
             current.birds[msg.id] = {
                 id: msg.id,
                 y: msg.y,
                 velocity: msg.velocity,
                 isDead: msg.isDead,
                 rotation: msg.rotation,
-                color: isHostRef.current ? 'red' : 'yellow' // Color logic might vary but OK for now
+                color: isHostRef.current ? 'red' : 'yellow'
             };
         }
         break;
@@ -280,20 +282,11 @@ export default function App() {
         break;
 
       case 'START_REQ':
-        // Guest requested start (if we add that feature), or Host broadcast start
         if (!isHostRef.current) startCountdownSequence();
         break;
 
       case 'RESTART':
         startCountdownSequence();
-        break;
-
-      case 'DIE':
-        // Backup death event just in case
-        if (current.birds[msg.playerId]) {
-            current.birds[msg.playerId].isDead = true;
-            current.birds[msg.playerId].y = msg.y;
-        }
         break;
     }
   };
@@ -359,7 +352,7 @@ export default function App() {
 
   const handleStartGame = () => {
       if (isHost) {
-          peerService.send({ type: 'RESTART' }); // Use RESTART type for both start/restart
+          peerService.send({ type: 'RESTART' });
           startCountdownSequence();
       }
   };
@@ -377,7 +370,8 @@ export default function App() {
     const dt = time - lastTimeRef.current;
     lastTimeRef.current = time;
     
-    const safeDt = Math.min(dt, 100);
+    // Cap dt to prevent huge jumps if tab is inactive
+    const safeDt = Math.min(dt, 50);
     const timeScale = safeDt / 16.66; 
 
     update(safeDt, timeScale);
@@ -387,7 +381,7 @@ export default function App() {
   };
 
   const update = (dt: number, timeScale: number) => {
-    // animate ground in lobby/countdown/playing
+    // animate ground
     if (statusRef.current === 'LOBBY' || statusRef.current === 'MENU' || statusRef.current === 'COUNTDOWN' || statusRef.current === 'PLAYING') {
          groundXRef.current = (groundXRef.current - (PIPE_SPEED * timeScale)) % 24;
     }
@@ -396,7 +390,7 @@ export default function App() {
 
     const current = gameStateRef.current;
     
-    // -- HOST ONLY: Pipe Spawning --
+    // -- HOST: Pipe Spawning --
     if (isHostRef.current) {
         spawnTimerRef.current += dt;
         if (spawnTimerRef.current >= PIPE_SPAWN_RATE_MS) {
@@ -410,14 +404,12 @@ export default function App() {
                 topHeight: randomH,
                 passed: false
             });
-            // Send sync immediately on spawn to ensure guest gets it
-            sendPipeSync();
+            sendPipeSync(); // Crucial: Send pipes immediately
         }
     }
 
     // -- ALL: Pipe Movement --
-    // Both move pipes locally for smoothness.
-    // Guest will snap to Host positions when PIPE_SYNC arrives.
+    // Guest interpolates locally, but snaps to Host syncs
     for (let i = current.pipes.length - 1; i >= 0; i--) {
         const p = current.pipes[i];
         p.x -= PIPE_SPEED * timeScale;
@@ -427,7 +419,7 @@ export default function App() {
         }
     }
 
-    // -- HOST ONLY: Scoring --
+    // -- HOST: Scoring --
     if (isHostRef.current) {
         let scoreChanged = false;
         current.pipes.forEach(p => {
@@ -443,9 +435,8 @@ export default function App() {
         }
     }
 
-    // -- ALL: Physics (Authoritative Self, Interpolated Remote) --
-    
-    // 1. My Bird Logic
+    // -- PHYSICS --
+    // 1. My Bird (Authoritative)
     const myBird = current.birds[myIdRef.current];
     if (myBird) {
         if (!myBird.isDead) {
@@ -460,12 +451,13 @@ export default function App() {
                 if (myBird.rotation > 90) myBird.rotation = 90;
             }
 
-            // Boundaries
+            // Ground Hit
             if (myBird.y + BIRD_SIZE >= GAME_HEIGHT - GROUND_HEIGHT) {
                 myBird.y = GAME_HEIGHT - GROUND_HEIGHT - BIRD_SIZE;
                 myBird.isDead = true;
                 triggerFlash();
             }
+            // Ceiling Hit
             if (myBird.y < 0) {
                 myBird.y = 0;
                 myBird.velocity = 0;
@@ -496,46 +488,30 @@ export default function App() {
         }
     }
 
-    // 2. Remote Birds Logic (Simulate Gravity/Fall for smoothness between updates)
-    (Object.values(current.birds) as BirdState[]).forEach(bird => {
-        if (bird.id !== myIdRef.current) {
-            if (!bird.isDead) {
-                // Apply simple gravity prediction
-                bird.velocity += GRAVITY * timeScale;
-                bird.y += bird.velocity * timeScale;
-                 // Rotation
-                if (bird.velocity < 0) {
-                    bird.rotation = -25;
-                } else if (bird.velocity > 0) {
-                    bird.rotation += 2 * timeScale;
-                    if (bird.rotation > 90) bird.rotation = 90;
-                }
-            } else {
-                 if (bird.y + BIRD_SIZE < GAME_HEIGHT - GROUND_HEIGHT) {
-                    bird.y += 10 * timeScale;
-                    bird.rotation = 90;
-                 }
-            }
-        }
-    });
+    // 2. Remote Birds (Passive)
+    // We do NOT simulate physics for them. We just render where they said they are.
+    // This fixes the "instantly falls" bug because we wait for their update.
 
-    // -- SYNC TIMERS --
-    // Send my updates frequently
+    // -- SYNC --
     syncTimerRef.current += dt;
-    if (syncTimerRef.current > 45) { // ~20 times per second
+    if (syncTimerRef.current > 30) { // Send updates ~30 times/sec
         sendPlayerUpdate();
         
-        // Host also syncs pipes periodically to correct drift
+        // Host syncs pipes periodically to ensure Guest didn't drift
         if (isHostRef.current) {
-            sendPipeSync();
+             // We only need to sync pipes if they change or to correct drift, 
+             // but sending frequently ensures Guest sees them if packet lost.
+             if (syncTimerRef.current > 100) {
+                 sendPipeSync();
+             }
         }
-        
         syncTimerRef.current = 0;
     }
 
     // Game Over Check
-    const allDead = (Object.values(current.birds) as BirdState[]).every(b => b.isDead);
-    if (allDead && Object.values(current.birds).length > 0) {
+    const birdsArray = Object.values(current.birds) as BirdState[];
+    const allDead = birdsArray.length > 0 && birdsArray.every(b => b.isDead);
+    if (allDead) {
         setStatus('GAME_OVER');
     }
   };
@@ -633,9 +609,6 @@ export default function App() {
 
           // Color
           const isMe = bird.id === myId;
-          const isYellow = isMe ? (isHostRef.current ? true : false) : (isHostRef.current ? false : true); 
-          // Simplified: Host always yellow? No, Host is self, Guest is self. 
-          // Let's stick to: My bird = yellow, Enemy = red for visibility.
           const colorHex = isMe ? '#facc15' : '#ef4444';
           
           ctx.fillStyle = bird.isDead ? '#999' : colorHex;
@@ -695,8 +668,7 @@ export default function App() {
     const myBird = gameStateRef.current.birds[myIdRef.current];
     if (myBird && !myBird.isDead) {
         myBird.velocity = JUMP_STRENGTH;
-        // Immediate send for responsiveness, though loop will send periodic updates too
-        sendPlayerUpdate();
+        sendPlayerUpdate(); // Send immediately for responsiveness
     }
   }, []);
 
@@ -734,6 +706,29 @@ export default function App() {
          onTouchStart={handleJump} 
          onMouseDown={handleJump}>
       
+      {/* DISCLAIMER MODAL */}
+      {showDisclaimer && (
+          <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm pointer-events-auto">
+              <div className="bg-[#ded895] border-4 border-black p-6 rounded shadow-[8px_8px_0_#fff] max-w-sm w-full animate-in zoom-in duration-300">
+                  <div className="flex justify-center mb-4">
+                      <AlertTriangle size={48} className="text-[#f97316] animate-bounce" />
+                  </div>
+                  <h2 className="text-xl font-bold text-center mb-4 text-black">WORK IN PROGRESS</h2>
+                  <p className="text-xs text-center font-mono mb-6 leading-relaxed text-black">
+                      This game is currently in development. You may experience bugs, connection issues, or desynchronization. 
+                      <br/><br/>
+                      We are working hard to make it perfect!
+                  </p>
+                  <button 
+                      onClick={(e) => { e.stopPropagation(); setShowDisclaimer(false); }}
+                      className="w-full bg-[#3b82f6] text-white font-bold py-3 border-b-4 border-r-4 border-black hover:bg-[#2563eb] active:border-0 active:translate-y-1 transition-all"
+                  >
+                      I UNDERSTAND
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Background Parallax */}
       <div className="absolute inset-0 z-0 bg-[#70c5ce]">
          <div className="absolute bottom-[100px] left-0 w-full opacity-50 h-[200px]"
@@ -763,7 +758,7 @@ export default function App() {
                 
                 <div className="flex flex-col gap-4">
                     <button 
-                        onClick={() => { setIsHost(true); setStatus('LOBBY'); }}
+                        onClick={(e) => { e.stopPropagation(); setIsHost(true); setStatus('LOBBY'); }}
                         className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50"
                         disabled={loadingId}
                     >
@@ -776,17 +771,19 @@ export default function App() {
                         <div className="flex-grow border-t-2 border-black/20"></div>
                     </div>
 
-                    <form onSubmit={(e) => { e.preventDefault(); if(hostId) { setIsHost(false); peerService.connect(hostId); } }} className="flex gap-2">
+                    <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if(hostId) { setIsHost(false); peerService.connect(hostId); } }} className="flex gap-2">
                         <input 
                             type="text" 
                             placeholder={loadingId ? "LOADING..." : "PASTE ID HERE"}
                             value={hostId}
                             onChange={e => setHostId(e.target.value)}
                             disabled={loadingId}
+                            onMouseDown={(e) => e.stopPropagation()}
                             className="flex-1 bg-white border-4 border-black p-2 outline-none font-mono uppercase text-sm placeholder-gray-400 text-black"
                         />
                         <button 
                             type="submit"
+                            onMouseDown={(e) => e.stopPropagation()}
                             className="bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold px-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50"
                             disabled={loadingId}
                         >
@@ -826,14 +823,14 @@ export default function App() {
                                 <span className="text-[10px] text-gray-500 font-bold uppercase">Share this ID</span>
                                 <div className="flex items-center gap-2">
                                     <code className="flex-1 text-xs font-mono bg-gray-100 p-1 truncate select-all text-black">{myId}</code>
-                                    <button onClick={handleCopy} className={`p-1 border-2 border-black hover:bg-gray-100 ${copied ? 'bg-green-200' : ''}`}>
+                                    <button onClick={(e) => { e.stopPropagation(); handleCopy(); }} className={`p-1 border-2 border-black hover:bg-gray-100 ${copied ? 'bg-green-200' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
                                         <Copy size={14} className="text-black" />
                                     </button>
                                 </div>
                             </div>
                          )}
                         <button 
-                            onClick={handleStartGame}
+                            onClick={(e) => { e.stopPropagation(); handleStartGame(); }}
                             className="bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold py-4 w-full border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
                             disabled={!connectedPeer}
                         >
@@ -879,7 +876,7 @@ export default function App() {
                     </div>
                     {isHost ? (
                          <button 
-                            onClick={handleRestart}
+                            onClick={(e) => { e.stopPropagation(); handleRestart(); }}
                             className="bg-white text-black px-6 py-3 font-bold border-4 border-black shadow-[4px_4px_0_#000] hover:bg-gray-100 active:translate-y-1 active:shadow-none transition-all flex items-center gap-2 mx-auto"
                         >
                             <RotateCcw size={18} /> RESTART
