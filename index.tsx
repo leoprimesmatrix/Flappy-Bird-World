@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import Peer, { DataConnection } from 'peerjs';
@@ -233,7 +234,7 @@ export default function App() {
     peerService.onConnect = (partnerId) => {
       setConnectedPeer(partnerId);
       if (isHost) {
-          setStatus('LOBBY');
+          // setStatus('LOBBY'); // Already in lobby
           gameStateRef.current.birds[partnerId] = { ...INITIAL_BIRD, id: partnerId, color: 'red' };
           setTimeout(() => sendSync(), 200);
       } else {
@@ -716,7 +717,7 @@ export default function App() {
                 
                 <div className="flex flex-col gap-4">
                     <button 
-                        onClick={() => { setIsHost(true); }}
+                        onClick={() => { setIsHost(true); setStatus('LOBBY'); }}
                         className="flex items-center justify-center gap-2 bg-[#f97316] hover:bg-[#ea580c] text-white font-bold py-4 border-b-4 border-r-4 border-black active:border-0 active:translate-y-1 transition-all disabled:opacity-50"
                         disabled={loadingId}
                     >
