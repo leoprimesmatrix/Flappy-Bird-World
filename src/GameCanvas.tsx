@@ -30,6 +30,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
   const [countdown, setCountdown] = useState<number | string>(3);
   const [readyCount, setReadyCount] = useState(0);
   const [totalPlayers, setTotalPlayers] = useState(0);
+  const totalPlayersRef = useRef(0);
 
   // Multiplayer state
   const mqttClientRef = useRef<MqttClient | null>(null);
@@ -156,6 +157,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 seedRef.current = data.seed;
                 playerIndexRef.current = myIdx;
                 setTotalPlayers(data.players.length);
+                totalPlayersRef.current = data.players.length;
                 setPlayerNames(data.playerNames);
                 roomAliveCountRef.current = data.players.length;
                 roomReadySetRef.current.clear();
@@ -200,7 +202,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
             if (data.type === 'player_ready_restart') {
               roomReadySetRef.current.add(data.playerIndex);
               setReadyCount(roomReadySetRef.current.size);
-              if (roomReadySetRef.current.size >= totalPlayers) {
+              if (roomReadySetRef.current.size >= totalPlayersRef.current) {
                 if (playerIndexRef.current === 0) {
                   client.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
                     type: 'restart_match',
@@ -212,9 +214,9 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
             if (data.type === 'restart_match') {
               roomReadySetRef.current.clear();
               setReadyCount(0);
-              roomAliveCountRef.current = totalPlayers;
+              roomAliveCountRef.current = totalPlayersRef.current;
               seedRef.current = data.seed;
-              initGame(totalPlayers);
+              initGame(totalPlayersRef.current);
               setGameState('countdown');
               stateRef.current.state = 'countdown';
               startGameSequence();
@@ -229,7 +231,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
     } else {
       initGame(mode === 'party' ? 4 : 1);
     }
-  }, [mode, playerName, totalPlayers]);
+  }, [mode, playerName]);
 
   const initGame = (numPlayers: number) => {
     const birds = [];
@@ -463,7 +465,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
       // Draw Opponents (Online)
       if (mode === 'ranked') {
         opponentsRef.current.forEach(opp => {
-          if (!opp.alive) return;
+          if (!opp.alive && opp.y >= height - GROUND_HEIGHT - BIRD_RADIUS) return;
           ctx.save();
           ctx.translate(100, opp.y);
 
@@ -720,7 +722,6 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 allOpponentsDead = false;
               }
             }
-            if (!opp.alive) return;
             opp.velocity += GRAVITY * dt;
             opp.y += opp.velocity * dt;
 
@@ -828,7 +829,6 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                   roomAliveCountRef.current--;
                 }
               }
-              if (!opp.alive) return;
               opp.velocity += GRAVITY * dt;
               opp.y += opp.velocity * dt;
               if (opp.y + BIRD_RADIUS >= height - GROUND_HEIGHT) {
