@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import mqtt, { MqttClient } from 'mqtt';
 import { playSound } from './utils/audio';
 
 interface GameCanvasProps {
@@ -32,8 +32,12 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
   const [totalPlayers, setTotalPlayers] = useState(0);
 
   // Multiplayer state
-  const socketRef = useRef<Socket | null>(null);
+  const mqttClientRef = useRef<MqttClient | null>(null);
   const roomIdRef = useRef<string | null>(null);
+  const clientIdRef = useRef('fb_world_' + Math.random().toString(36).substring(2, 10));
+  const waitingPlayersRef = useRef<{ id: string, name: string }[]>([]);
+  const roomAliveCountRef = useRef(0);
+  const roomReadyCountRef = useRef(0);
   const [waitingCount, setWaitingCount] = useState(0);
   const opponentsRef = useRef<Map<string, any>>(new Map());
   const playerIndexRef = useRef(0);
@@ -63,120 +67,162 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
       setGameState('matchmaking');
       stateRef.current.state = 'matchmaking';
       setConnectionStatus('connecting');
-      socketRef.current = io();
 
-      socketRef.current.on('connect', () => {
+      // Connect to public MQTT WebSocket broker (no backend server required!)
+      const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+      mqttClientRef.current = client;
+
+      client.on('connect', () => {
         setConnectionStatus('connected');
-        socketRef.current?.emit('join_matchmaking', { name: playerName });
+        client.subscribe('flappybird/lobby');
+        waitingPlayersRef.current = [{ id: clientIdRef.current, name: playerName || 'Guest' }];
+        setWaitingCount(1);
+
+        client.publish('flappybird/lobby', JSON.stringify({ type: 'hello', id: clientIdRef.current, name: playerName || 'Guest' }));
       });
 
-      socketRef.current.on('disconnect', () => {
-        setConnectionStatus('disconnected');
-      });
-
-      socketRef.current.on('waiting_for_players', (data) => {
-        setWaitingCount(data.count);
-      });
-
-      socketRef.current.on('match_found', (data) => {
-        roomIdRef.current = data.roomId;
-        seedRef.current = data.seed;
-        playerIndexRef.current = data.playerIndex;
-        setTotalPlayers(data.totalPlayers);
-        if (data.playerNames) {
-          setPlayerNames(data.playerNames);
-        }
-
-        // Initialize opponents
-        opponentsRef.current.clear();
-        for (let i = 0; i < data.totalPlayers; i++) {
-          if (i !== data.playerIndex) {
-            opponentsRef.current.set(i.toString(), {
-              id: i.toString(),
-              playerIndex: i,
-              y: 300,
-              velocity: 0,
-              alive: true,
-              score: 0
-            });
-          }
-        }
-
-        initGame(data.totalPlayers);
-        setGameState('countdown');
-        stateRef.current.state = 'countdown';
-      });
-
-      socketRef.current.on('countdown', (count) => {
+      const startGameSequence = () => {
+        let count: number | string = 3;
         setCountdown(count);
-        if (count === 'GO!') playSound('score');
-        else playSound('hover');
-      });
-
-      socketRef.current.on('start_game', () => {
-        setGameState('playing');
-        stateRef.current.state = 'playing';
-        stateRef.current.birds.forEach(b => b.velocity = 0);
-
-        // Emit initial position so opponents can see us immediately
-        const bird = stateRef.current.birds[0];
-        if (bird) {
-          socketRef.current?.emit('player_update', {
-            roomId: roomIdRef.current,
-            playerIndex: playerIndexRef.current,
-            y: bird.y,
-            velocity: bird.velocity,
-            alive: bird.alive,
-            score: stateRef.current.score
-          });
-        }
-      });
-
-      socketRef.current.on('opponent_update', (data) => {
-        if (data.playerIndex !== undefined) {
-          opponentsRef.current.set(data.playerIndex.toString(), data);
-        }
-      });
-
-      socketRef.current.on('opponent_died', (data) => {
-        if (data.playerIndex !== undefined) {
-          const opp = opponentsRef.current.get(data.playerIndex.toString());
-          if (opp) {
-            opp.alive = false;
+        playSound('hover');
+        const iv = setInterval(() => {
+          if (typeof count === 'number') count--;
+          if (typeof count === 'number' && count > 0) {
+            setCountdown(count);
+            playSound('hover');
+          } else if (count === 0) {
+            setCountdown('GO!');
+            count = 'GO!'; // switch type to stop decrement
+            playSound('score');
+          } else {
+            clearInterval(iv);
+            setGameState('playing');
+            stateRef.current.state = 'playing';
+            stateRef.current.birds.forEach(b => b.velocity = 0);
+            const bird = stateRef.current.birds[0];
+            if (bird && client) {
+              client.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+                type: 'player_update',
+                playerIndex: playerIndexRef.current,
+                y: bird.y,
+                velocity: bird.velocity,
+                alive: bird.alive,
+                score: stateRef.current.score
+              }));
+            }
           }
-          setAliveStatus(prev => {
-            const next = [...prev];
-            next[data.playerIndex] = false;
-            return next;
-          });
-        }
-      });
+        }, 1000);
+      };
 
-      socketRef.current.on('all_players_died', () => {
-        stateRef.current.state = 'gameover';
-        setGameState('gameover');
+      client.on('message', (topic, message) => {
+        try {
+          const data = JSON.parse(message.toString());
 
-        let m = 'Bronze';
-        if (stateRef.current.score >= 40) m = 'Platinum';
-        else if (stateRef.current.score >= 30) m = 'Gold';
-        else if (stateRef.current.score >= 20) m = 'Silver';
-        else if (stateRef.current.score < 10) m = 'None';
-        setMedals(m);
-      });
+          if (topic === 'flappybird/lobby') {
+            if ((data.type === 'hello' || data.type === 'presence') && data.id !== clientIdRef.current) {
+              if (!waitingPlayersRef.current.find(p => p.id === data.id)) {
+                waitingPlayersRef.current.push({ id: data.id, name: data.name });
+                setWaitingCount(waitingPlayersRef.current.length);
+              }
+              if (data.type === 'hello') {
+                client.publish('flappybird/lobby', JSON.stringify({ type: 'presence', id: clientIdRef.current, name: playerName || 'Guest' }));
+              }
+            }
 
-      socketRef.current.on('player_ready_update', (data) => {
-        setReadyCount(data.readyCount);
-      });
+            if (waitingPlayersRef.current.length >= 2 && stateRef.current.state === 'matchmaking') {
+              const sorted = [...waitingPlayersRef.current].sort((a, b) => a.id.localeCompare(b.id));
+              if (sorted[0].id === clientIdRef.current) {
+                const roomId = 'room_' + Math.random().toString(36).substring(2, 10);
+                const p = sorted.slice(0, 4);
+                setTimeout(() => {
+                  client.publish('flappybird/lobby', JSON.stringify({
+                    type: 'match_found',
+                    roomId,
+                    seed: Math.random(),
+                    players: p.map(player => player.id),
+                    playerNames: p.map(player => player.name)
+                  }));
+                }, 500);
+              }
+            }
 
-      socketRef.current.on('restart_match', (data) => {
-        seedRef.current = data.seed;
-        initGame(totalPlayers);
-        setGameState('countdown');
-        stateRef.current.state = 'countdown';
+            if (data.type === 'match_found') {
+              const myIdx = data.players.indexOf(clientIdRef.current);
+              if (myIdx !== -1) {
+                client.unsubscribe('flappybird/lobby');
+                client.subscribe(`flappybird/room/${data.roomId}`);
+
+                roomIdRef.current = data.roomId;
+                seedRef.current = data.seed;
+                playerIndexRef.current = myIdx;
+                setTotalPlayers(data.players.length);
+                setPlayerNames(data.playerNames);
+                roomAliveCountRef.current = data.players.length;
+                roomReadyCountRef.current = 0;
+
+                opponentsRef.current.clear();
+                for (let i = 0; i < data.players.length; i++) {
+                  if (i !== myIdx) {
+                    opponentsRef.current.set(i.toString(), {
+                      id: i.toString(),
+                      playerIndex: i,
+                      y: 300,
+                      velocity: 0,
+                      alive: true,
+                      score: 0
+                    });
+                  }
+                }
+                initGame(data.players.length);
+                setGameState('countdown');
+                stateRef.current.state = 'countdown';
+                startGameSequence();
+              }
+            }
+          } else if (topic.startsWith('flappybird/room/')) {
+            if (data.type === 'player_update' && data.playerIndex !== playerIndexRef.current) {
+              opponentsRef.current.set(data.playerIndex.toString(), data);
+            }
+            if (data.type === 'player_died' && data.playerIndex !== playerIndexRef.current) {
+              const opp = opponentsRef.current.get(data.playerIndex.toString());
+              if (opp && opp.alive) {
+                opp.alive = false;
+                roomAliveCountRef.current--;
+                setAliveStatus(prev => {
+                  const next = [...prev];
+                  next[data.playerIndex] = false;
+                  return next;
+                });
+              }
+            }
+            if (data.type === 'player_ready_restart') {
+              roomReadyCountRef.current++;
+              setReadyCount(roomReadyCountRef.current);
+              if (roomReadyCountRef.current >= totalPlayers) {
+                if (playerIndexRef.current === 0) {
+                  client.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+                    type: 'restart_match',
+                    seed: Math.random()
+                  }));
+                }
+              }
+            }
+            if (data.type === 'restart_match') {
+              roomReadyCountRef.current = 0;
+              setReadyCount(0);
+              roomAliveCountRef.current = totalPlayers;
+              seedRef.current = data.seed;
+              initGame(totalPlayers);
+              setGameState('countdown');
+              stateRef.current.state = 'countdown';
+              startGameSequence();
+            }
+          }
+        } catch (e) { console.error(e); }
       });
 
       return () => {
-        socketRef.current?.disconnect();
+        client.end();
       };
     } else {
       initGame(mode === 'party' ? 4 : 1);
@@ -250,14 +296,14 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
         bird.velocity = FLAP_SPEED;
 
         if (mode === 'ranked' && bird.isLocal) {
-          socketRef.current?.emit('player_update', {
-            roomId: roomIdRef.current,
+          mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+            type: 'player_update',
             playerIndex: playerIndexRef.current,
             y: bird.y,
             velocity: bird.velocity,
             alive: bird.alive,
             score: s.score
-          });
+          }));
         }
       }
     }
@@ -712,11 +758,19 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
 
         if (allLocalDead) {
           if (mode === 'ranked') {
-            if (!allOpponentsDead) {
+            if (roomAliveCountRef.current <= 0 || allOpponentsDead) {
+              s.state = 'gameover';
+              setGameState('gameover');
+              let m = 'Bronze';
+              if (s.score >= 40) m = 'Platinum';
+              else if (s.score >= 30) m = 'Gold';
+              else if (s.score >= 20) m = 'Silver';
+              else if (s.score < 10) m = 'None';
+              setMedals(m);
+            } else {
               s.state = 'spectating';
               setGameState('spectating');
             }
-            // If allOpponentsDead is true, we wait for server to emit 'all_players_died'
           } else {
             s.state = 'gameover';
             setGameState('gameover');
@@ -801,7 +855,11 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
       });
 
       if (mode === 'ranked' && bird.isLocal) {
-        socketRef.current?.emit('player_died', { roomId: roomIdRef.current, playerIndex: playerIndexRef.current });
+        roomAliveCountRef.current--;
+        mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+          type: 'player_died',
+          playerIndex: playerIndexRef.current
+        }));
       }
     };
 
@@ -1000,7 +1058,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 <button onMouseEnter={() => playSound('hover')} onClick={() => {
                   playSound('click');
                   if (mode === 'ranked') {
-                    socketRef.current?.emit('player_ready_restart', { roomId: roomIdRef.current });
+                    mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({ type: 'player_ready_restart' }));
                     setGameState('waiting_restart');
                   } else {
                     initGame(mode === 'party' ? 4 : 1);
