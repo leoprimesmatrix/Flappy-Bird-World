@@ -169,7 +169,8 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                       y: 300,
                       velocity: 0,
                       alive: true,
-                      score: 0
+                      score: 0,
+                      lastUpdate: performance.now()
                     });
                   }
                 }
@@ -182,7 +183,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
           } else if (topic.startsWith('flappybird/room/')) {
             if (data.type === 'player_update' && data.playerIndex !== playerIndexRef.current) {
               const old = opponentsRef.current.get(data.playerIndex.toString()) || {};
-              opponentsRef.current.set(data.playerIndex.toString(), { ...old, ...data });
+              opponentsRef.current.set(data.playerIndex.toString(), { ...old, ...data, lastUpdate: performance.now() });
             }
             if (data.type === 'player_died' && data.playerIndex !== playerIndexRef.current) {
               const opp = opponentsRef.current.get(data.playerIndex.toString());
@@ -710,16 +711,22 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
         let allOpponentsDead = true;
         if (mode === 'ranked') {
           opponentsRef.current.forEach(opp => {
-            if (opp.alive) allOpponentsDead = false;
+            if (opp.alive) {
+              const now = performance.now();
+              if (opp.lastUpdate && now - opp.lastUpdate > 3000) {
+                opp.alive = false;
+                roomAliveCountRef.current--;
+              } else {
+                allOpponentsDead = false;
+              }
+            }
             if (!opp.alive) return;
             opp.velocity += GRAVITY * dt;
             opp.y += opp.velocity * dt;
 
-            // Floor collision for opponent
+            // Floor collision for opponent (do NOT kill them locally, wait for explicit network death)
             if (opp.y + BIRD_RADIUS >= height - GROUND_HEIGHT) {
               opp.y = height - GROUND_HEIGHT - BIRD_RADIUS;
-              // We rely on server to tell us they died, but we can cap their position
-              opp.alive = false; // Mark dead locally to prevent getting stuck in spectating
             }
           });
         }
@@ -814,6 +821,13 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
 
           if (mode === 'ranked') {
             opponentsRef.current.forEach(opp => {
+              if (opp.alive) {
+                const now = performance.now();
+                if (opp.lastUpdate && now - opp.lastUpdate > 3000) {
+                  opp.alive = false;
+                  roomAliveCountRef.current--;
+                }
+              }
               if (!opp.alive) return;
               opp.velocity += GRAVITY * dt;
               opp.y += opp.velocity * dt;
@@ -821,6 +835,17 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 opp.y = height - GROUND_HEIGHT - BIRD_RADIUS;
               }
             });
+
+            if (roomAliveCountRef.current <= 0) {
+              s.state = 'gameover';
+              setGameState('gameover');
+              let m = 'Bronze';
+              if (s.score >= 40) m = 'Platinum';
+              else if (s.score >= 30) m = 'Gold';
+              else if (s.score >= 20) m = 'Silver';
+              else if (s.score < 10) m = 'None';
+              setMedals(m);
+            }
           }
         }
 
