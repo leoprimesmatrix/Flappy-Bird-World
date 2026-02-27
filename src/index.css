@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fredoka One", cursive;
+  --font-sans: "Nunito", sans-serif;
+  
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-float-fast: float 2s ease-in-out infinite;
+  --animate-scroll: scroll 10s linear infinite;
+  --animate-shine: shine 1.5s infinite;
+  --animate-pop-in: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  --animate-bounce-slow: bounce 2s infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+  }
+  @keyframes shine {
+    0% { opacity: 0.4; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1.05); }
+    100% { opacity: 0.4; transform: scale(0.95); }
+  }
+  @keyframes popIn {
+    0% { opacity: 0; transform: scale(0.5); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+}
+
+@layer utilities {
+  .text-stroke {
+    -webkit-text-stroke: 2px black;
+    paint-order: stroke fill;
+  }
+  .text-stroke-lg {
+    -webkit-text-stroke: 8px black;
+    paint-order: stroke fill;
+  }
+  .glossy-text {
+    background: linear-gradient(to bottom, #fff 0%, #eee 40%, #ccc 50%, #fff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+  }
+  .card-glow {
+    box-shadow: inset 0 0 40px rgba(255,255,255,0.2), 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .btn-shadow {
+    box-shadow: 0 6px 0 rgba(0,0,0,0.3), 0 10px 10px rgba(0,0,0,0.2);
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  .btn-shadow:active {
+    transform: translateY(6px);
+    box-shadow: 0 0 0 rgba(0,0,0,0.3), inset 0 4px 8px rgba(0,0,0,0.2);
+  }
+}

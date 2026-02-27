@@ -1,0 +1,5 @@
+{
+  "name": "Flappy Bird World",
+  "description": "A multiplayer Flappy Bird clone with local and online modes.",
+  "requestFramePermissions": []
+}
