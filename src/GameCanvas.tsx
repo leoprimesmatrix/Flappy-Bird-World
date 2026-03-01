@@ -6,6 +6,7 @@ interface GameCanvasProps {
   mode: 'single' | 'party' | 'ranked';
   playerName?: string;
   onBack: () => void;
+  isDarkMode?: boolean;
 }
 
 const GRAVITY = 2000;
@@ -19,7 +20,7 @@ const GROUND_HEIGHT = 100;
 
 const COLORS = ['#FFD700', '#1E90FF', '#FF4757', '#2ED573']; // Yellow, Blue, Red, Green
 
-export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps) {
+export default function GameCanvas({ mode, playerName, onBack, isDarkMode = false }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<'ready' | 'playing' | 'gameover' | 'matchmaking' | 'countdown' | 'spectating' | 'waiting_restart'>('ready');
   const [score, setScore] = useState(0);
@@ -395,57 +396,121 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
 
       // Draw Background (Sky)
       const skyGradient = ctx.createLinearGradient(0, 0, 0, height);
-      skyGradient.addColorStop(0, '#38BDF8');
-      skyGradient.addColorStop(1, '#BAE6FD');
+      if (isDarkMode) {
+        skyGradient.addColorStop(0, '#0B0F19');
+        skyGradient.addColorStop(1, '#1E1B4B');
+      } else {
+        skyGradient.addColorStop(0, '#38BDF8');
+        skyGradient.addColorStop(1, '#BAE6FD');
+      }
       ctx.fillStyle = skyGradient;
       ctx.fillRect(0, 0, width, height);
 
-      // Draw Sunbeams
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.beginPath();
-      ctx.moveTo(width * 0.2, -50);
-      ctx.lineTo(width * 0.4, -50);
-      ctx.lineTo(width * 0.1, height);
-      ctx.lineTo(-width * 0.1, height);
-      ctx.fill();
+      if (isDarkMode) {
+        // Draw Stars
+        ctx.fillStyle = '#FFF';
+        for (let i = 0; i < 40; i++) {
+          const x = Math.abs(Math.sin(i * 123.45)) * width;
+          const y = Math.abs(Math.cos(i * 543.21)) * (height - GROUND_HEIGHT);
+          const size = Math.abs(Math.sin(i * 345)) * 1.5 + 0.5;
+          const alpha = 0.3 + Math.abs(Math.sin(performance.now() / 1000 + i * 1.5)) * 0.7;
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.arc(x, y, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+      } else {
+        // Draw Sunbeams
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.beginPath();
+        ctx.moveTo(width * 0.2, -50);
+        ctx.lineTo(width * 0.4, -50);
+        ctx.lineTo(width * 0.1, height);
+        ctx.lineTo(-width * 0.1, height);
+        ctx.fill();
 
-      ctx.beginPath();
-      ctx.moveTo(width * 0.6, -50);
-      ctx.lineTo(width * 0.9, -50);
-      ctx.lineTo(width * 0.5, height);
-      ctx.lineTo(width * 0.2, height);
-      ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(width * 0.6, -50);
+        ctx.lineTo(width * 0.9, -50);
+        ctx.lineTo(width * 0.5, height);
+        ctx.lineTo(width * 0.2, height);
+        ctx.fill();
+      }
 
       // Draw Parallax City
-      ctx.fillStyle = '#7DD3FC'; // lighter blue for distant city
-      for (let i = 0; i < 15; i++) {
-        const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
-        const h = 100 + (i % 5) * 40;
-        ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
-      }
-      ctx.fillStyle = '#38BDF8'; // closer city
-      for (let i = 0; i < 10; i++) {
-        const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
-        const h = 80 + (i % 3) * 50;
-        ctx.fillRect(x, height - GROUND_HEIGHT - h, 80, h);
+      if (isDarkMode) {
+        ctx.lineWidth = 2;
+        // Distant city
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#FF00FF';
+        ctx.strokeStyle = '#FF00FF';
+        ctx.fillStyle = '#0F172A';
+        for (let i = 0; i < 15; i++) {
+          const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
+          const h = 100 + (i % 5) * 40;
+          ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
+          ctx.strokeRect(x, height - GROUND_HEIGHT - h, 65, h);
+        }
+
+        ctx.shadowColor = '#00FFFF';
+        ctx.strokeStyle = '#00FFFF';
+        for (let i = 0; i < 10; i++) {
+          const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
+          const h = 80 + (i % 3) * 50;
+          ctx.fillRect(x, height - GROUND_HEIGHT - h, 80, h);
+          ctx.strokeRect(x, height - GROUND_HEIGHT - h, 80, h);
+        }
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = '#7DD3FC'; // lighter blue for distant city
+        for (let i = 0; i < 15; i++) {
+          const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
+          const h = 100 + (i % 5) * 40;
+          ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
+        }
+        ctx.fillStyle = '#38BDF8'; // closer city
+        for (let i = 0; i < 10; i++) {
+          const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
+          const h = 80 + (i % 3) * 50;
+          ctx.fillRect(x, height - GROUND_HEIGHT - h, 80, h);
+        }
       }
 
       // Draw Pipes
       s.pipes.forEach(pipe => {
         const pipeGrad = ctx.createLinearGradient(pipe.x, 0, pipe.x + PIPE_WIDTH, 0);
-        pipeGrad.addColorStop(0, '#22C55E');
-        pipeGrad.addColorStop(0.3, '#4ADE80');
-        pipeGrad.addColorStop(0.6, '#22C55E');
-        pipeGrad.addColorStop(1, '#15803D');
+        if (isDarkMode) {
+          pipeGrad.addColorStop(0, '#10B981');
+          pipeGrad.addColorStop(0.3, '#34D399');
+          pipeGrad.addColorStop(0.6, '#10B981');
+          pipeGrad.addColorStop(1, '#047857');
+        } else {
+          pipeGrad.addColorStop(0, '#22C55E');
+          pipeGrad.addColorStop(0.3, '#4ADE80');
+          pipeGrad.addColorStop(0.6, '#22C55E');
+          pipeGrad.addColorStop(1, '#15803D');
+        }
 
         const capGrad = ctx.createLinearGradient(pipe.x - 4, 0, pipe.x + PIPE_WIDTH + 4, 0);
-        capGrad.addColorStop(0, '#16A34A');
-        capGrad.addColorStop(0.5, '#4ADE80');
-        capGrad.addColorStop(1, '#166534');
+        if (isDarkMode) {
+          capGrad.addColorStop(0, '#059669');
+          capGrad.addColorStop(0.5, '#6EE7B7');
+          capGrad.addColorStop(1, '#064E3B');
+        } else {
+          capGrad.addColorStop(0, '#16A34A');
+          capGrad.addColorStop(0.5, '#4ADE80');
+          capGrad.addColorStop(1, '#166534');
+        }
 
         ctx.fillStyle = pipeGrad;
-        ctx.strokeStyle = '#14532D';
+        ctx.strokeStyle = isDarkMode ? '#A7F3D0' : '#14532D';
         ctx.lineWidth = 3;
+
+        if (isDarkMode) {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = '#34D399';
+        }
 
         // Top pipe
         ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
@@ -465,29 +530,61 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
         ctx.fillStyle = capGrad;
         ctx.fillRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
         ctx.strokeRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
+
+        ctx.shadowBlur = 0;
       });
 
       // Draw Ground
-      ctx.fillStyle = '#DED895';
-      ctx.fillRect(0, height - GROUND_HEIGHT, width, GROUND_HEIGHT);
+      if (isDarkMode) {
+        ctx.fillStyle = '#0F172A';
+        ctx.fillRect(0, height - GROUND_HEIGHT, width, GROUND_HEIGHT);
 
-      // Ground stripes
-      ctx.fillStyle = 'rgba(217, 119, 6, 0.1)';
-      for (let i = -2; i < width / 20 + 4; i++) {
-        const x = (i * 30 - (s.groundOffset % 30));
+        ctx.strokeStyle = '#F472B6';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#F472B6';
+
         ctx.beginPath();
-        ctx.moveTo(x, height - GROUND_HEIGHT);
-        ctx.lineTo(x - 20, height);
-        ctx.lineTo(x - 10, height);
-        ctx.lineTo(x + 10, height - GROUND_HEIGHT);
-        ctx.fill();
-      }
+        for (let i = 0; i < 4; i++) {
+          ctx.moveTo(0, height - GROUND_HEIGHT + i * 25);
+          ctx.lineTo(width, height - GROUND_HEIGHT + i * 25);
+        }
+        for (let i = -5; i < width / 30 + 5; i++) {
+          const x = (i * 40 - (s.groundOffset % 40));
+          ctx.moveTo(x + 50, height - GROUND_HEIGHT);
+          ctx.lineTo(x - 50, height);
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
 
-      // Ground top border
-      ctx.fillStyle = '#73bf2e';
-      ctx.fillRect(0, height - GROUND_HEIGHT, width, 16);
-      ctx.fillStyle = '#558f22';
-      ctx.fillRect(0, height - GROUND_HEIGHT + 16, width, 4);
+        // Ground top border
+        ctx.fillStyle = '#E0E7FF';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#38BDF8';
+        ctx.fillRect(0, height - GROUND_HEIGHT, width, 4);
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = '#DED895';
+        ctx.fillRect(0, height - GROUND_HEIGHT, width, GROUND_HEIGHT);
+
+        // Ground stripes
+        ctx.fillStyle = 'rgba(217, 119, 6, 0.1)';
+        for (let i = -2; i < width / 20 + 4; i++) {
+          const x = (i * 30 - (s.groundOffset % 30));
+          ctx.beginPath();
+          ctx.moveTo(x, height - GROUND_HEIGHT);
+          ctx.lineTo(x - 20, height);
+          ctx.lineTo(x - 10, height);
+          ctx.lineTo(x + 10, height - GROUND_HEIGHT);
+          ctx.fill();
+        }
+
+        // Ground top border
+        ctx.fillStyle = '#73bf2e';
+        ctx.fillRect(0, height - GROUND_HEIGHT, width, 16);
+        ctx.fillStyle = '#558f22';
+        ctx.fillRect(0, height - GROUND_HEIGHT + 16, width, 4);
+      }
 
       // Draw Opponents (Online)
       if (mode === 'ranked') {
@@ -930,12 +1027,12 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
       cancelAnimationFrame(animationFrameId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [mode]);
+  }, [mode, isDarkMode]);
 
   return (
-    <div className="relative w-full h-screen bg-slate-900 flex items-center justify-center overflow-hidden font-['Fredoka_One',cursive]">
+    <div className={`relative w-full h-screen flex items-center justify-center overflow-hidden transition-colors duration-500 font-['Fredoka_One',cursive] ${isDarkMode ? 'bg-slate-950' : 'bg-slate-900'}`}>
       <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#475569 2px, transparent 2px)', backgroundSize: '30px 30px' }}></div>
-      <div className="relative w-full max-w-[500px] h-full max-h-[800px] bg-[#87CEEB] shadow-2xl overflow-hidden rounded-none md:rounded-3xl md:h-[95vh] md:border-8 md:border-slate-800">
+      <div className={`relative w-full max-w-[500px] h-full max-h-[800px] shadow-2xl overflow-hidden transition-colors duration-500 rounded-none md:rounded-3xl md:h-[95vh] md:border-8 ${isDarkMode ? 'bg-[#0B0F19] md:border-slate-800/80 shadow-[0_0_80px_rgba(236,72,153,0.15)]' : 'bg-[#87CEEB] md:border-slate-800'}`}>
 
         <canvas
           ref={canvasRef}

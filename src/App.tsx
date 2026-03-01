@@ -10,19 +10,30 @@ import GameCanvas from './GameCanvas';
 export default function App() {
   const [view, setView] = useState<'title' | 'single' | 'party' | 'ranked'>('title');
   const [playerName, setPlayerName] = useState<string>('');
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('darkMode') === 'true';
+  });
+
+  const toggleDarkMode = () => {
+    const nextVal = !isDarkMode;
+    setIsDarkMode(nextVal);
+    localStorage.setItem('darkMode', String(nextVal));
+  };
 
   if (view === 'title') {
     return (
-      <TitleScreen 
+      <TitleScreen
         onStartSingle={() => setView('single')}
         onStartRanked={(name) => {
           setPlayerName(name);
           setView('ranked');
         }}
         onStartParty={() => setView('party')}
+        isDarkMode={isDarkMode}
+        toggleDarkMode={toggleDarkMode}
       />
     );
   }
 
-  return <GameCanvas mode={view} playerName={playerName} onBack={() => setView('title')} />;
+  return <GameCanvas mode={view} playerName={playerName} onBack={() => setView('title')} isDarkMode={isDarkMode} />;
 }
