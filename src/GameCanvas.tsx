@@ -7,7 +7,6 @@ interface GameCanvasProps {
   playerName?: string;
   onBack: () => void;
   isDarkMode?: boolean;
-  timePhase?: 'day' | 'sunset' | 'night';
 }
 
 const GRAVITY = 2000;
@@ -21,7 +20,7 @@ const GROUND_HEIGHT = 100;
 
 const COLORS = ['#FFD700', '#1E90FF', '#FF4757', '#2ED573']; // Yellow, Blue, Red, Green
 
-export default function GameCanvas({ mode, playerName, onBack, isDarkMode = false, timePhase = 'day' }: GameCanvasProps) {
+export default function GameCanvas({ mode, playerName, onBack, isDarkMode = false }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<'ready' | 'playing' | 'gameover' | 'matchmaking' | 'countdown' | 'spectating' | 'waiting_restart'>('ready');
   const [score, setScore] = useState(0);
@@ -46,6 +45,8 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
   const opponentsRef = useRef<Map<string, any>>(new Map());
   const playerIndexRef = useRef(0);
   const seedRef = useRef(Math.random());
+  // Grace period timer — after local death, give 800ms for network messages to arrive
+  const spectatingGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Game state refs for loop
   const stateRef = useRef({
@@ -381,6 +382,11 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
     const TICK_RATE = 60;
     const TICK_DT = 1 / TICK_RATE;
 
+    // Detect mobile for performance optimizations
+    const isMobile = window.innerWidth < 768 || /Mobi|Android/i.test(navigator.userAgent);
+    // On mobile skip heavy GPU effects (shadowBlur, radial gradients, many arc calls)
+    const highQuality = !isMobile;
+
     const render = (alpha: number) => {
       const s = stateRef.current;
       const width = canvas.width;
@@ -400,9 +406,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       if (isDarkMode) {
         skyGradient.addColorStop(0, '#0B0F19');
         skyGradient.addColorStop(1, '#1E1B4B');
-      } else if (timePhase === 'sunset') {
-        skyGradient.addColorStop(0, '#FB923C'); // orange-400
-        skyGradient.addColorStop(1, '#F43F5E'); // rose-500
       } else {
         skyGradient.addColorStop(0, '#38BDF8');
         skyGradient.addColorStop(1, '#BAE6FD');
@@ -411,22 +414,30 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       ctx.fillRect(0, 0, width, height);
 
       if (isDarkMode) {
-        // Draw Stars
-        ctx.fillStyle = '#FFF';
-        for (let i = 0; i < 40; i++) {
-          const x = Math.abs(Math.sin(i * 123.45)) * width;
-          const y = Math.abs(Math.cos(i * 543.21)) * (height - GROUND_HEIGHT);
+        // Draw Stars — fewer and simpler on mobile
+        const starCount = highQuality ? 40 : 18;
+        const now = performance.now() / 1000;
+        for (let i = 0; i < starCount; i++) {
+          const sx = Math.abs(Math.sin(i * 123.45)) * width;
+          const sy = Math.abs(Math.cos(i * 543.21)) * (height - GROUND_HEIGHT);
           const size = Math.abs(Math.sin(i * 345)) * 1.5 + 0.5;
-          const alpha = 0.3 + Math.abs(Math.sin(performance.now() / 1000 + i * 1.5)) * 0.7;
+          const alpha = highQuality
+            ? 0.3 + Math.abs(Math.sin(now + i * 1.5)) * 0.7
+            : 0.6; // static alpha on mobile saves Math.sin calls
           ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          ctx.arc(x, y, size, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = '#FFF';
+          if (highQuality) {
+            ctx.beginPath();
+            ctx.arc(sx, sy, size, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            ctx.fillRect(sx - size, sy - size, size * 2, size * 2);
+          }
         }
         ctx.globalAlpha = 1.0;
       } else {
         // Draw Sunbeams
-        ctx.fillStyle = timePhase === 'sunset' ? 'rgba(255, 200, 100, 0.15)' : 'rgba(255, 255, 255, 0.15)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
         ctx.beginPath();
         ctx.moveTo(width * 0.2, -50);
         ctx.lineTo(width * 0.4, -50);
@@ -445,31 +456,42 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       // Draw Parallax City
       if (isDarkMode) {
         ctx.lineWidth = 2;
-        // Distant city
-        ctx.strokeStyle = '#FF00FF';
         ctx.fillStyle = '#0F172A';
+        // Distant city — neon outlines only on high quality
+        if (highQuality) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = '#FF00FF';
+          ctx.strokeStyle = '#FF00FF';
+        } else {
+          ctx.strokeStyle = 'rgba(255,0,255,0.5)';
+        }
         for (let i = 0; i < 15; i++) {
           const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
           const h = 100 + (i % 5) * 40;
           ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
           ctx.strokeRect(x, height - GROUND_HEIGHT - h, 65, h);
         }
-
-        ctx.strokeStyle = '#00FFFF';
+        if (highQuality) {
+          ctx.shadowColor = '#00FFFF';
+          ctx.strokeStyle = '#00FFFF';
+        } else {
+          ctx.strokeStyle = 'rgba(0,255,255,0.5)';
+        }
         for (let i = 0; i < 10; i++) {
           const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
           const h = 80 + (i % 3) * 50;
           ctx.fillRect(x, height - GROUND_HEIGHT - h, 80, h);
           ctx.strokeRect(x, height - GROUND_HEIGHT - h, 80, h);
         }
+        ctx.shadowBlur = 0;
       } else {
-        ctx.fillStyle = timePhase === 'sunset' ? '#F43F5E' : '#7DD3FC'; // lighter blue for distant city
+        ctx.fillStyle = '#7DD3FC'; // lighter blue for distant city
         for (let i = 0; i < 15; i++) {
           const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
           const h = 100 + (i % 5) * 40;
           ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
         }
-        ctx.fillStyle = timePhase === 'sunset' ? '#E11D48' : '#38BDF8'; // closer city
+        ctx.fillStyle = '#38BDF8'; // closer city
         for (let i = 0; i < 10; i++) {
           const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
           const h = 80 + (i % 3) * 50;
@@ -507,6 +529,11 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.strokeStyle = isDarkMode ? '#A7F3D0' : '#14532D';
         ctx.lineWidth = 3;
 
+        if (isDarkMode && highQuality) {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = '#34D399';
+        }
+
         // Top pipe
         ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
         ctx.strokeRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
@@ -525,6 +552,8 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.fillStyle = capGrad;
         ctx.fillRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
         ctx.strokeRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
+
+        ctx.shadowBlur = 0;
       });
 
       // Draw Ground
@@ -534,6 +563,10 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
         ctx.strokeStyle = '#F472B6';
         ctx.lineWidth = 2;
+        if (highQuality) {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = '#F472B6';
+        }
 
         ctx.beginPath();
         for (let i = 0; i < 4; i++) {
@@ -546,10 +579,16 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
           ctx.lineTo(x - 50, height);
         }
         ctx.stroke();
+        ctx.shadowBlur = 0;
 
         // Ground top border
-        ctx.fillStyle = '#38BDF8';
+        ctx.fillStyle = '#E0E7FF';
+        if (highQuality) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = '#38BDF8';
+        }
         ctx.fillRect(0, height - GROUND_HEIGHT, width, 4);
+        ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = '#DED895';
         ctx.fillRect(0, height - GROUND_HEIGHT, width, GROUND_HEIGHT);
@@ -573,12 +612,16 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.fillRect(0, height - GROUND_HEIGHT + 16, width, 4);
       }
 
-      // Draw Opponents (Online)
+      // Draw Opponents (Online) — use displayY for smooth interpolation
       if (mode === 'ranked') {
         opponentsRef.current.forEach(opp => {
-          if (!opp.alive && opp.y >= height - GROUND_HEIGHT - BIRD_RADIUS) return;
+          // Smooth lerp towards network target position
+          if (opp.displayY === undefined) opp.displayY = opp.y;
+          opp.displayY += (opp.y - opp.displayY) * 0.3;
+
+          if (!opp.alive && opp.displayY >= height - GROUND_HEIGHT - BIRD_RADIUS) return;
           ctx.save();
-          ctx.translate(100, opp.y);
+          ctx.translate(100, opp.displayY);
 
           // Draw Name
           if (opp.playerIndex !== undefined && playerNames[opp.playerIndex]) {
@@ -684,12 +727,17 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       ctx.ellipse(0, 0, BIRD_RADIUS + 4, BIRD_RADIUS, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Underbelly / highlight
-      const highlightGrad = ctx.createRadialGradient(-4, -4, 0, -4, -4, BIRD_RADIUS + 4);
-      highlightGrad.addColorStop(0, 'rgba(255,255,255,0.7)');
-      highlightGrad.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = highlightGrad;
-      ctx.fill();
+      // Underbelly / highlight — skip expensive radial gradient on mobile
+      if (highQuality) {
+        const highlightGrad = ctx.createRadialGradient(-4, -4, 0, -4, -4, BIRD_RADIUS + 4);
+        highlightGrad.addColorStop(0, 'rgba(255,255,255,0.7)');
+        highlightGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = highlightGrad;
+        ctx.fill();
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.fill();
+      }
       ctx.stroke();
 
       // Eye
@@ -804,7 +852,7 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
         if (mode === 'ranked') {
           (s as any).updateTimer = ((s as any).updateTimer || 0) + dt;
-          if ((s as any).updateTimer >= 0.05) { // 20 times a second heartbeat
+          if ((s as any).updateTimer >= 0.033) { // ~30Hz heartbeat (was 50ms/20Hz)
             (s as any).updateTimer = 0;
             const bird = s.birds[0];
             if (bird && bird.alive) {
@@ -877,6 +925,7 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         if (allLocalDead) {
           if (mode === 'ranked') {
             if (roomAliveCountRef.current <= 0) {
+              // All opponents already dead — straight to gameover
               s.state = 'gameover';
               setGameState('gameover');
               let m = 'Bronze';
@@ -886,8 +935,24 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
               else if (s.score < 10) m = 'None';
               setMedals(m);
             } else {
+              // Enter spectating, but give 800ms grace for any in-flight player_died messages
               s.state = 'spectating';
               setGameState('spectating');
+              // Clear any existing grace timer
+              if (spectatingGraceTimerRef.current) clearTimeout(spectatingGraceTimerRef.current);
+              spectatingGraceTimerRef.current = setTimeout(() => {
+                if (stateRef.current.state === 'spectating' && roomAliveCountRef.current <= 0) {
+                  stateRef.current.state = 'gameover';
+                  setGameState('gameover');
+                  const sc = stateRef.current.score;
+                  let m = 'Bronze';
+                  if (sc >= 40) m = 'Platinum';
+                  else if (sc >= 30) m = 'Gold';
+                  else if (sc >= 20) m = 'Silver';
+                  else if (sc < 10) m = 'None';
+                  setMedals(m);
+                }
+              }, 800);
             }
           } else {
             s.state = 'gameover';
@@ -984,7 +1049,8 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       animationFrameId = requestAnimationFrame(loop);
       let frameTime = (time - lastTime) / 1000;
       lastTime = time;
-      if (frameTime > 0.25) frameTime = 0.25;
+      // Tighter cap for mobile — avoids spiral of death when tab suspends
+      if (frameTime > 0.1) frameTime = 0.1;
 
       accumulator += frameTime;
       while (accumulator >= TICK_DT) {
@@ -997,13 +1063,27 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
     animationFrameId = requestAnimationFrame(loop);
 
+    const handleVisibilityChange = () => {
+      const s = stateRef.current;
+      if (document.visibilityState === 'hidden' && s.state === 'playing' && mode === 'ranked') {
+        // Kill local birds if player tabs out during a ranked match
+        s.birds.forEach(bird => {
+          if (bird.isLocal && bird.alive) {
+            die(bird);
+          }
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       cancelAnimationFrame(animationFrameId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [mode, isDarkMode, timePhase]);
+  }, [mode, isDarkMode]);
 
   return (
-    <div className={`relative w-full h-screen flex items-center justify-center overflow-hidden transition-colors duration-500 font-['Fredoka_One',cursive] ${isDarkMode ? 'bg-slate-950' : timePhase === 'sunset' ? 'bg-orange-800' : 'bg-slate-900'}`}>
+    <div className={`relative w-full h-screen flex items-center justify-center overflow-hidden transition-colors duration-500 font-['Fredoka_One',cursive] ${isDarkMode ? 'bg-slate-950' : 'bg-slate-900'}`}>
       <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#475569 2px, transparent 2px)', backgroundSize: '30px 30px' }}></div>
       <div className={`relative w-full max-w-[500px] h-full max-h-[800px] shadow-2xl overflow-hidden transition-colors duration-500 rounded-none md:rounded-3xl md:h-[95vh] md:border-8 ${isDarkMode ? 'bg-[#0B0F19] md:border-slate-800/80 shadow-[0_0_80px_rgba(236,72,153,0.15)]' : 'bg-[#87CEEB] md:border-slate-800'}`}>
 

@@ -8,10 +8,11 @@ interface TitleScreenProps {
   onStartParty: () => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
-  timePhase: 'day' | 'sunset' | 'night';
+  timeOfDay: 'day' | 'dusk' | 'night';
+  isNightForced: boolean;
 }
 
-export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty, isDarkMode, toggleDarkMode, timePhase }: TitleScreenProps) {
+export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty, isDarkMode, toggleDarkMode, timeOfDay, isNightForced }: TitleScreenProps) {
   const [showNameModal, setShowNameModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showPatchNotesModal, setShowPatchNotesModal] = useState(false);
@@ -32,27 +33,56 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
     onStartRanked(tempName.trim());
   };
 
+  // Pick background image & overlay based on time of day
+  const getBgStyle = () => {
+    if (timeOfDay === 'night') {
+      return 'linear-gradient(rgba(5, 8, 20, 0.85) 0%, rgba(5, 8, 20, 0.97) 100%), url("https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=2094&auto=format&fit=crop")';
+    }
+    if (timeOfDay === 'dusk') {
+      return 'linear-gradient(rgba(30, 15, 40, 0.6) 0%, rgba(120, 50, 10, 0.55) 100%), url("https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=2070&auto=format&fit=crop")';
+    }
+    // day
+    return 'linear-gradient(rgba(135, 206, 235, 0.6) 0%, rgba(255, 255, 255, 0.2) 100%), url("https://lh3.googleusercontent.com/aida-public/AB6AXuBqt2GkUtmvsqv54zLthuZ4MnjX3FxzqhNIRmBrxqKDSit9dLmrlhlytm4wOUJsRrHA5KRCjO5mwgt4e-wTE-BcVkU15VN-w4XJ0gf1y4BQ4udZ0xRZXcms_JKdt7yJKGBETzEAmSu4S7qpkVZqK_GZGW4Tqa17YGQaj19mbVso0WW-ghlzWOJwQzt4sBWpzc1_QJBLaXoVIqG5Qz8NGnu9SEctMQiAg_hqylJuFd4PKBYE1QcRJAJlln5t0VGVZZHrsiE96DHh5fI")';
+  };
+
+  const getRootBg = () => {
+    if (timeOfDay === 'night') return 'bg-slate-950 text-slate-100';
+    if (timeOfDay === 'dusk') return 'bg-[#1C0A2A] text-slate-100';
+    return isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-[#87CEEB] text-slate-900';
+  };
+
   return (
-    <div className={`relative flex min-h-screen w-full flex-col overflow-y-auto overflow-x-hidden transition-colors duration-500 font-['Nunito',sans-serif] selection:bg-[#FF4757] selection:text-white ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-[#87CEEB] text-slate-900'}`}>
+    <div className={`relative flex min-h-screen w-full flex-col overflow-y-auto overflow-x-hidden transition-colors duration-1000 font-['Nunito',sans-serif] selection:bg-[#FF4757] selection:text-white ${getRootBg()}`}>
       <div
-        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-500"
-        style={{
-          backgroundImage: timePhase === 'night'
-            ? 'linear-gradient(rgba(15, 23, 42, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%), url("https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=2094&auto=format&fit=crop")'
-            : timePhase === 'sunset'
-              ? 'linear-gradient(rgba(249, 115, 22, 0.6) 0%, rgba(225, 29, 72, 0.3) 100%), url("https://images.unsplash.com/photo-1502134249126-9f3755a50d78?q=80&w=2070&auto=format&fit=crop")'
-              : 'linear-gradient(rgba(135, 206, 235, 0.6) 0%, rgba(255, 255, 255, 0.2) 100%), url("https://lh3.googleusercontent.com/aida-public/AB6AXuBqt2GkUtmvsqv54zLthuZ4MnjX3FxzqhNIRmBrxqKDSit9dLmrlhlytm4wOUJsRrHA5KRCjO5mwgt4e-wTE-BcVkU15VN-w4XJ0gf1y4BQ4udZ0xRZXcms_JKdt7yJKGBETmEAmSu4S7qpkVZqK_GZGW4Tqa17YGQaj19mbVso0WW-ghlzWOJwQzt4sBWpzc1_QJBLaXoVIqG5Qz8NGnu9SEctMQiAg_hqylJuFd4PKBYE1QcRJAJlln5t0VGVZZHrsiE96DHh5fI")'
-        }}
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-1000"
+        style={{ backgroundImage: getBgStyle() }}
       ></div>
-      {timePhase === 'night' ? (
+
+      {/* Ambient glow orbs — colour-coded per time of day */}
+      {timeOfDay === 'night' && (
         <>
           <div className="fixed top-10 left-10 w-24 h-24 bg-pink-500/20 rounded-full blur-2xl"></div>
           <div className="fixed bottom-20 right-20 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-indigo-900/20 rounded-full blur-3xl"></div>
         </>
-      ) : (
+      )}
+      {timeOfDay === 'dusk' && (
+        <>
+          <div className="fixed top-10 left-10 w-24 h-24 bg-orange-400/30 rounded-full blur-2xl"></div>
+          <div className="fixed bottom-20 right-20 w-32 h-32 bg-purple-500/25 rounded-full blur-2xl"></div>
+          <div className="fixed bottom-0 left-0 w-48 h-48 bg-pink-600/15 rounded-full blur-3xl"></div>
+        </>
+      )}
+      {timeOfDay === 'day' && !isDarkMode && (
         <>
           <div className="fixed top-10 left-10 w-24 h-24 bg-white/30 rounded-full blur-2xl"></div>
           <div className="fixed bottom-20 right-20 w-32 h-32 bg-yellow-400/20 rounded-full blur-2xl"></div>
+        </>
+      )}
+      {timeOfDay === 'day' && isDarkMode && (
+        <>
+          <div className="fixed top-10 left-10 w-24 h-24 bg-pink-500/20 rounded-full blur-2xl"></div>
+          <div className="fixed bottom-20 right-20 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
         </>
       )}
 
@@ -80,8 +110,15 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
                 <span className="material-symbols-outlined text-[#FF4757] text-3xl md:text-5xl font-black" style={{ fontVariationSettings: '"FILL" 1, "wght" 700' }}>flutter_dash</span>
               </div>
             </div>
-            <div className={`bg-black/20 backdrop-blur-sm px-4 md:px-6 py-2 rounded-full mt-4 border-2 ${isDarkMode ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-white/30'} text-center`}>
-              <h2 className={`text-sm md:text-lg lg:text-xl font-black tracking-wider uppercase drop-shadow-md ${isDarkMode ? 'text-pink-100' : 'text-white'}`}>
+            <div className={`bg-black/20 backdrop-blur-sm px-4 md:px-6 py-2 rounded-full mt-4 border-2 ${timeOfDay === 'night' ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' :
+                timeOfDay === 'dusk' ? 'border-orange-400/50 shadow-[0_0_15px_rgba(251,146,60,0.3)]' :
+                  isDarkMode ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' :
+                    'border-white/30'
+              } text-center`}>
+              <h2 className={`text-sm md:text-lg lg:text-xl font-black tracking-wider uppercase drop-shadow-md ${timeOfDay === 'night' ? 'text-pink-100' :
+                  timeOfDay === 'dusk' ? 'text-orange-100' :
+                    isDarkMode ? 'text-pink-100' : 'text-white'
+                }`}>
                 CLASSIC FLAPPY BIRD RE-IMAGINED WITH ONLINE PLAY!
               </h2>
             </div>
@@ -141,6 +178,14 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
                 </div>
               </div>
             </button>
+
+            {/* Time-of-day ambient badge */}
+            {timeOfDay !== 'day' && (
+              <div className={`w-full max-w-[480px] py-1.5 px-4 rounded-full text-center text-xs font-bold uppercase tracking-wider ${timeOfDay === 'night' ? 'bg-indigo-950/80 text-cyan-300 border border-cyan-800/50' : 'bg-orange-950/60 text-orange-200 border border-orange-700/50'
+                }`}>
+                {timeOfDay === 'night' ? '🌙 Midnight Mode — Cozy & Relaxed' : '🌅 Winding Down — Dusk Mode'}
+              </div>
+            )}
 
             <div className="flex gap-4 w-full mt-2">
               <button onMouseEnter={() => playSound('hover')} onClick={() => { playSound('click'); setShowSettingsModal(true); }} className={`flex-1 h-10 md:h-12 rounded-2xl ${isDarkMode ? 'bg-slate-800 border-b-4 border-slate-900 text-slate-200 hover:bg-slate-700' : 'bg-white border-b-4 border-slate-300 text-slate-700 hover:bg-slate-50'} font-bold active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center gap-2 shadow-lg text-sm md:text-base`}>
@@ -265,18 +310,31 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
                   <span className="text-white font-bold">Dark Mode</span>
                 </div>
                 <button
-                  onClick={() => { if (timePhase !== 'night') { playSound('click'); toggleDarkMode(); } }}
-                  className={`relative w-14 h-8 rounded-full transition-colors duration-300 ${isDarkMode ? 'bg-pink-500' : 'bg-slate-500'} ${timePhase === 'night' ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                  onClick={() => { if (!isNightForced) { playSound('click'); toggleDarkMode(); } }}
+                  title={isNightForced ? "Dark mode is locked during night hours (10 PM – 7 AM)" : undefined}
+                  className={`relative w-14 h-8 rounded-full transition-colors duration-300 ${isNightForced ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    } ${isDarkMode ? 'bg-pink-500' : 'bg-slate-500'}`}
                 >
                   <div className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform duration-300 ${isDarkMode ? 'left-7' : 'left-1'}`}></div>
                 </button>
               </div>
 
+              {isNightForced && (
+                <div className="bg-indigo-950/80 border border-cyan-800/50 rounded-xl px-4 py-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-cyan-400 text-sm">bedtime</span>
+                  <p className="text-cyan-200 text-xs font-semibold">
+                    It's late! Dark mode is locked from 10 PM – 7 AM for a cozy experience. 🌙
+                  </p>
+                </div>
+              )}
+
               <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800' : 'bg-slate-700'} mt-2`}>
                 <p className="text-xs text-slate-400 text-center">
-                  {timePhase === 'night'
-                    ? 'Midnight hours: Dark Mode is locked on to save your eyes!'
-                    : 'Tip: Dark Mode also changes the gameplay graphics to an energetic neon night mode.'}
+                  {timeOfDay === 'night'
+                    ? '🌙 Midnight Mode: Cozy neon night. Sweet dreams after gaming!'
+                    : timeOfDay === 'dusk'
+                      ? '🌅 Dusk Mode: The sun is setting. Time to wind down.'
+                      : 'Tip: Dark Mode also changes gameplay graphics to an energetic neon night mode.'}
                 </p>
               </div>
             </div>
