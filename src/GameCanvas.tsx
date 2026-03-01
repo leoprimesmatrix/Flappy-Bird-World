@@ -39,6 +39,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
   const waitingPlayersRef = useRef<{ id: string, name: string }[]>([]);
   const roomAliveCountRef = useRef(0);
   const roomReadySetRef = useRef<Set<number>>(new Set());
+  const matchGenRef = useRef(0);
   const [waitingCount, setWaitingCount] = useState(0);
   const opponentsRef = useRef<Map<string, any>>(new Map());
   const playerIndexRef = useRef(0);
@@ -159,7 +160,9 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 setTotalPlayers(data.players.length);
                 totalPlayersRef.current = data.players.length;
                 setPlayerNames(data.playerNames);
-                roomAliveCountRef.current = data.players.length;
+                // Only count opponents (not self) — self-death is handled separately
+                roomAliveCountRef.current = data.players.length - 1;
+                matchGenRef.current++;
                 roomReadySetRef.current.clear();
 
                 opponentsRef.current.clear();
@@ -184,37 +187,61 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
             }
           } else if (topic.startsWith('flappybird/room/')) {
             if (data.type === 'player_update' && data.playerIndex !== playerIndexRef.current) {
-              const old = opponentsRef.current.get(data.playerIndex.toString()) || {};
-              opponentsRef.current.set(data.playerIndex.toString(), { ...old, ...data, lastUpdate: performance.now() });
+              const opp = opponentsRef.current.get(data.playerIndex.toString());
+              if (opp) {
+                // Directly use network position — do NOT simulate local gravity
+                opp.y = data.y;
+                opp.velocity = data.velocity;
+                opp.alive = data.alive;
+                opp.score = data.score;
+                opp.lastUpdate = performance.now();
+              }
             }
             if (data.type === 'player_died' && data.playerIndex !== playerIndexRef.current) {
               const opp = opponentsRef.current.get(data.playerIndex.toString());
               if (opp && opp.alive) {
                 opp.alive = false;
-                roomAliveCountRef.current--;
+                opp.velocity = 0;
+                roomAliveCountRef.current = Math.max(0, roomAliveCountRef.current - 1);
                 setAliveStatus(prev => {
                   const next = [...prev];
                   next[data.playerIndex] = false;
                   return next;
                 });
+                // Check if all opponents dead → transition to gameover
+                if (roomAliveCountRef.current <= 0) {
+                  const s = stateRef.current;
+                  if (s.state === 'spectating' || s.state === 'playing') {
+                    s.state = 'gameover';
+                    setGameState('gameover');
+                    let m = 'Bronze';
+                    if (s.score >= 40) m = 'Platinum';
+                    else if (s.score >= 30) m = 'Gold';
+                    else if (s.score >= 20) m = 'Silver';
+                    else if (s.score < 10) m = 'None';
+                    setMedals(m);
+                  }
+                }
               }
             }
-            if (data.type === 'player_ready_restart') {
+            if (data.type === 'player_ready_restart' && data.matchGen === matchGenRef.current) {
               roomReadySetRef.current.add(data.playerIndex);
               setReadyCount(roomReadySetRef.current.size);
               if (roomReadySetRef.current.size >= totalPlayersRef.current) {
                 if (playerIndexRef.current === 0) {
                   client.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
                     type: 'restart_match',
-                    seed: Math.random()
+                    seed: Math.random(),
+                    matchGen: matchGenRef.current
                   }));
                 }
               }
             }
-            if (data.type === 'restart_match') {
+            if (data.type === 'restart_match' && data.matchGen === matchGenRef.current) {
+              matchGenRef.current++;
               roomReadySetRef.current.clear();
               setReadyCount(0);
-              roomAliveCountRef.current = totalPlayersRef.current;
+              roomAliveCountRef.current = totalPlayersRef.current - 1;
               seedRef.current = data.seed;
               initGame(totalPlayersRef.current);
               setGameState('countdown');
@@ -709,25 +736,16 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
           }
         }
 
-        // Update opponents (simulate physics locally)
-        let allOpponentsDead = true;
+        // Clamp opponent positions (no local physics — just use network data)
         if (mode === 'ranked') {
           opponentsRef.current.forEach(opp => {
-            if (opp.alive) {
-              const now = performance.now();
-              if (opp.lastUpdate && now - opp.lastUpdate > 3000) {
-                opp.alive = false;
-                roomAliveCountRef.current--;
-              } else {
-                allOpponentsDead = false;
-              }
-            }
-            opp.velocity += GRAVITY * dt;
-            opp.y += opp.velocity * dt;
-
-            // Floor collision for opponent (do NOT kill them locally, wait for explicit network death)
+            // Clamp to floor
             if (opp.y + BIRD_RADIUS >= height - GROUND_HEIGHT) {
               opp.y = height - GROUND_HEIGHT - BIRD_RADIUS;
+            }
+            // Clamp to ceiling
+            if (opp.y - BIRD_RADIUS <= 0) {
+              opp.y = BIRD_RADIUS;
             }
           });
         }
@@ -774,7 +792,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
 
         if (allLocalDead) {
           if (mode === 'ranked') {
-            if (roomAliveCountRef.current <= 0 || allOpponentsDead) {
+            if (roomAliveCountRef.current <= 0) {
               s.state = 'gameover';
               setGameState('gameover');
               let m = 'Bronze';
@@ -820,32 +838,14 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
             if (p.x + PIPE_WIDTH < 0) s.pipes.splice(i, 1);
           }
 
+          // Clamp opponent positions (no local physics)
           if (mode === 'ranked') {
             opponentsRef.current.forEach(opp => {
-              if (opp.alive) {
-                const now = performance.now();
-                if (opp.lastUpdate && now - opp.lastUpdate > 3000) {
-                  opp.alive = false;
-                  roomAliveCountRef.current--;
-                }
-              }
-              opp.velocity += GRAVITY * dt;
-              opp.y += opp.velocity * dt;
               if (opp.y + BIRD_RADIUS >= height - GROUND_HEIGHT) {
                 opp.y = height - GROUND_HEIGHT - BIRD_RADIUS;
               }
             });
-
-            if (roomAliveCountRef.current <= 0) {
-              s.state = 'gameover';
-              setGameState('gameover');
-              let m = 'Bronze';
-              if (s.score >= 40) m = 'Platinum';
-              else if (s.score >= 30) m = 'Gold';
-              else if (s.score >= 20) m = 'Silver';
-              else if (s.score < 10) m = 'None';
-              setMedals(m);
-            }
+            // gameover transition is handled by player_died message handler
           }
         }
 
@@ -888,7 +888,7 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
       });
 
       if (mode === 'ranked' && bird.isLocal) {
-        roomAliveCountRef.current--;
+        // Don't decrement roomAliveCountRef for local player — it only tracks opponents
         mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
           type: 'player_died',
           playerIndex: playerIndexRef.current
@@ -1091,11 +1091,25 @@ export default function GameCanvas({ mode, playerName, onBack }: GameCanvasProps
                 <button onMouseEnter={() => playSound('hover')} onClick={() => {
                   playSound('click');
                   if (mode === 'ranked') {
+                    // Add self to ready set immediately (don't wait for MQTT echo)
+                    roomReadySetRef.current.add(playerIndexRef.current);
+                    setReadyCount(roomReadySetRef.current.size);
                     mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
                       type: 'player_ready_restart',
-                      playerIndex: playerIndexRef.current
+                      playerIndex: playerIndexRef.current,
+                      matchGen: matchGenRef.current
                     }));
                     setGameState('waiting_restart');
+                    // Check if all players ready
+                    if (roomReadySetRef.current.size >= totalPlayersRef.current) {
+                      if (playerIndexRef.current === 0) {
+                        mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+                          type: 'restart_match',
+                          seed: Math.random(),
+                          matchGen: matchGenRef.current
+                        }));
+                      }
+                    }
                   } else {
                     initGame(mode === 'party' ? 4 : 1);
                   }
