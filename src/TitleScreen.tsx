@@ -111,13 +111,13 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
               </div>
             </div>
             <div className={`bg-black/20 backdrop-blur-sm px-4 md:px-6 py-2 rounded-full mt-4 border-2 ${timeOfDay === 'night' ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' :
-                timeOfDay === 'dusk' ? 'border-orange-400/50 shadow-[0_0_15px_rgba(251,146,60,0.3)]' :
-                  isDarkMode ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' :
-                    'border-white/30'
+              timeOfDay === 'dusk' ? 'border-orange-400/50 shadow-[0_0_15px_rgba(251,146,60,0.3)]' :
+                isDarkMode ? 'border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.3)]' :
+                  'border-white/30'
               } text-center`}>
               <h2 className={`text-sm md:text-lg lg:text-xl font-black tracking-wider uppercase drop-shadow-md ${timeOfDay === 'night' ? 'text-pink-100' :
-                  timeOfDay === 'dusk' ? 'text-orange-100' :
-                    isDarkMode ? 'text-pink-100' : 'text-white'
+                timeOfDay === 'dusk' ? 'text-orange-100' :
+                  isDarkMode ? 'text-pink-100' : 'text-white'
                 }`}>
                 CLASSIC FLAPPY BIRD RE-IMAGINED WITH ONLINE PLAY!
               </h2>
@@ -358,8 +358,24 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
 
               <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-700/80 border-slate-600'}`}>
                 <div className="flex justify-between items-center mb-2">
-                  <h3 className="text-green-400 font-bold text-lg">Beta v1.0.3</h3>
+                  <h3 className="text-green-400 font-bold text-lg">Beta v1.0.4</h3>
                   <span className="text-slate-400 text-xs font-mono">Today</span>
+                </div>
+                <ul className="text-slate-200 text-sm flex flex-col gap-2 list-disc pl-4">
+                  <li>CRITICAL FIX: Alive players no longer get instant game over when their opponent dies</li>
+                  <li>CRITICAL FIX: Spectating no longer gets stuck — death is re-broadcast for reliability</li>
+                  <li>Added 10-second spectating hard timeout as final safety net</li>
+                  <li>Heavy mobile performance optimizations — reduced network rate and GPU load</li>
+                  <li>Smoother opponent rendering on all devices via position interpolation</li>
+                  <li>Added Day/Night cozy cycle based on your real-world time zone</li>
+                  <li>Dark mode auto-locks after 10 PM for a cozy midnight experience 🌙</li>
+                </ul>
+              </div>
+
+              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-700/80 border-slate-600'}`}>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-emerald-400 font-bold text-lg">Beta v1.0.3</h3>
+                  <span className="text-slate-400 text-xs font-mono">Yesterday</span>
                 </div>
                 <ul className="text-slate-200 text-sm flex flex-col gap-2 list-disc pl-4">
                   <li>Added Settings Modal with Dark Mode toggle</li>

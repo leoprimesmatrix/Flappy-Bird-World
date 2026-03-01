@@ -45,8 +45,9 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
   const opponentsRef = useRef<Map<string, any>>(new Map());
   const playerIndexRef = useRef(0);
   const seedRef = useRef(Math.random());
-  // Grace period timer — after local death, give 800ms for network messages to arrive
-  const spectatingGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Spectating fallback: hard timeout + repeated death broadcasts
+  const spectatingStartRef = useRef<number>(0);
+  const deathBroadcastIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Game state refs for loop
   const stateRef = useRef({
@@ -211,10 +212,12 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
                   next[data.playerIndex] = false;
                   return next;
                 });
-                // Check if all opponents dead → transition to gameover
+                // Only transition to gameover if the LOCAL player is already dead (spectating)
+                // Do NOT end the game for a player who is still alive and playing!
                 if (roomAliveCountRef.current <= 0) {
                   const s = stateRef.current;
-                  if (s.state === 'spectating' || s.state === 'playing') {
+                  if (s.state === 'spectating') {
+                    if (deathBroadcastIntervalRef.current) { clearInterval(deathBroadcastIntervalRef.current); deathBroadcastIntervalRef.current = null; }
                     s.state = 'gameover';
                     setGameState('gameover');
                     let m = 'Bronze';
@@ -224,6 +227,7 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
                     else if (s.score < 10) m = 'None';
                     setMedals(m);
                   }
+                  // If s.state === 'playing', do nothing — the local player is still alive!
                 }
               }
             }
@@ -852,7 +856,8 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
         if (mode === 'ranked') {
           (s as any).updateTimer = ((s as any).updateTimer || 0) + dt;
-          if ((s as any).updateTimer >= 0.033) { // ~30Hz heartbeat (was 50ms/20Hz)
+          const updateInterval = isMobile ? 0.1 : 0.05; // 10Hz mobile, 20Hz desktop
+          if ((s as any).updateTimer >= updateInterval) {
             (s as any).updateTimer = 0;
             const bird = s.birds[0];
             if (bird && bird.alive) {
@@ -935,24 +940,18 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
               else if (s.score < 10) m = 'None';
               setMedals(m);
             } else {
-              // Enter spectating, but give 800ms grace for any in-flight player_died messages
+              // Enter spectating — opponents are still alive
               s.state = 'spectating';
               setGameState('spectating');
-              // Clear any existing grace timer
-              if (spectatingGraceTimerRef.current) clearTimeout(spectatingGraceTimerRef.current);
-              spectatingGraceTimerRef.current = setTimeout(() => {
-                if (stateRef.current.state === 'spectating' && roomAliveCountRef.current <= 0) {
-                  stateRef.current.state = 'gameover';
-                  setGameState('gameover');
-                  const sc = stateRef.current.score;
-                  let m = 'Bronze';
-                  if (sc >= 40) m = 'Platinum';
-                  else if (sc >= 30) m = 'Gold';
-                  else if (sc >= 20) m = 'Silver';
-                  else if (sc < 10) m = 'None';
-                  setMedals(m);
-                }
-              }, 800);
+              spectatingStartRef.current = performance.now();
+              // Re-broadcast our death every 2s to fight MQTT QoS 0 packet loss
+              if (deathBroadcastIntervalRef.current) clearInterval(deathBroadcastIntervalRef.current);
+              deathBroadcastIntervalRef.current = setInterval(() => {
+                mqttClientRef.current?.publish(`flappybird/room/${roomIdRef.current}`, JSON.stringify({
+                  type: 'player_died',
+                  playerIndex: playerIndexRef.current
+                }));
+              }, 2000);
             }
           } else {
             s.state = 'gameover';
@@ -994,7 +993,18 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
                 opp.y = height - GROUND_HEIGHT - BIRD_RADIUS;
               }
             });
-            // gameover transition is handled by player_died message handler
+            // Hard timeout: if spectating for >10s with no living opponents left, force gameover
+            if (performance.now() - spectatingStartRef.current > 10000 && roomAliveCountRef.current <= 0) {
+              if (deathBroadcastIntervalRef.current) { clearInterval(deathBroadcastIntervalRef.current); deathBroadcastIntervalRef.current = null; }
+              s.state = 'gameover';
+              setGameState('gameover');
+              let m = 'Bronze';
+              if (s.score >= 40) m = 'Platinum';
+              else if (s.score >= 30) m = 'Gold';
+              else if (s.score >= 20) m = 'Silver';
+              else if (s.score < 10) m = 'None';
+              setMedals(m);
+            }
           }
         }
 
