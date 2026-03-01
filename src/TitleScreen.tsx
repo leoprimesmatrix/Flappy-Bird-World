@@ -8,9 +8,10 @@ interface TitleScreenProps {
   onStartParty: () => void;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
+  timePhase: 'day' | 'sunset' | 'night';
 }
 
-export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty, isDarkMode, toggleDarkMode }: TitleScreenProps) {
+export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty, isDarkMode, toggleDarkMode, timePhase }: TitleScreenProps) {
   const [showNameModal, setShowNameModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showPatchNotesModal, setShowPatchNotesModal] = useState(false);
@@ -36,12 +37,14 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
       <div
         className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-500"
         style={{
-          backgroundImage: isDarkMode
+          backgroundImage: timePhase === 'night'
             ? 'linear-gradient(rgba(15, 23, 42, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%), url("https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=2094&auto=format&fit=crop")'
-            : 'linear-gradient(rgba(135, 206, 235, 0.6) 0%, rgba(255, 255, 255, 0.2) 100%), url("https://lh3.googleusercontent.com/aida-public/AB6AXuBqt2GkUtmvsqv54zLthuZ4MnjX3FxzqhNIRmBrxqKDSit9dLmrlhlytm4wOUJsRrHA5KRCjO5mwgt4e-wTE-BcVkU15VN-w4XJ0gf1y4BQ4udZ0xRZXcms_JKdt7yJKGBETzEAmSu4S7qpkVZqK_GZGW4Tqa17YGQaj19mbVso0WW-ghlzWOJwQzt4sBWpzc1_QJBLaXoVIqG5Qz8NGnu9SEctMQiAg_hqylJuFd4PKBYE1QcRJAJlln5t0VGVZZHrsiE96DHh5fI")'
+            : timePhase === 'sunset'
+              ? 'linear-gradient(rgba(249, 115, 22, 0.6) 0%, rgba(225, 29, 72, 0.3) 100%), url("https://images.unsplash.com/photo-1502134249126-9f3755a50d78?q=80&w=2070&auto=format&fit=crop")'
+              : 'linear-gradient(rgba(135, 206, 235, 0.6) 0%, rgba(255, 255, 255, 0.2) 100%), url("https://lh3.googleusercontent.com/aida-public/AB6AXuBqt2GkUtmvsqv54zLthuZ4MnjX3FxzqhNIRmBrxqKDSit9dLmrlhlytm4wOUJsRrHA5KRCjO5mwgt4e-wTE-BcVkU15VN-w4XJ0gf1y4BQ4udZ0xRZXcms_JKdt7yJKGBETmEAmSu4S7qpkVZqK_GZGW4Tqa17YGQaj19mbVso0WW-ghlzWOJwQzt4sBWpzc1_QJBLaXoVIqG5Qz8NGnu9SEctMQiAg_hqylJuFd4PKBYE1QcRJAJlln5t0VGVZZHrsiE96DHh5fI")'
         }}
       ></div>
-      {isDarkMode ? (
+      {timePhase === 'night' ? (
         <>
           <div className="fixed top-10 left-10 w-24 h-24 bg-pink-500/20 rounded-full blur-2xl"></div>
           <div className="fixed bottom-20 right-20 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
@@ -262,8 +265,8 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
                   <span className="text-white font-bold">Dark Mode</span>
                 </div>
                 <button
-                  onClick={() => { playSound('click'); toggleDarkMode(); }}
-                  className={`relative w-14 h-8 rounded-full transition-colors duration-300 ${isDarkMode ? 'bg-pink-500' : 'bg-slate-500'}`}
+                  onClick={() => { if (timePhase !== 'night') { playSound('click'); toggleDarkMode(); } }}
+                  className={`relative w-14 h-8 rounded-full transition-colors duration-300 ${isDarkMode ? 'bg-pink-500' : 'bg-slate-500'} ${timePhase === 'night' ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                 >
                   <div className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform duration-300 ${isDarkMode ? 'left-7' : 'left-1'}`}></div>
                 </button>
@@ -271,7 +274,9 @@ export default function TitleScreen({ onStartSingle, onStartRanked, onStartParty
 
               <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800' : 'bg-slate-700'} mt-2`}>
                 <p className="text-xs text-slate-400 text-center">
-                  Tip: Dark Mode also changes the gameplay graphics to an energetic neon night mode.
+                  {timePhase === 'night'
+                    ? 'Midnight hours: Dark Mode is locked on to save your eyes!'
+                    : 'Tip: Dark Mode also changes the gameplay graphics to an energetic neon night mode.'}
                 </p>
               </div>
             </div>

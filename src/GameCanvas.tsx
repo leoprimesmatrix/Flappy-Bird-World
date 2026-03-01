@@ -7,6 +7,7 @@ interface GameCanvasProps {
   playerName?: string;
   onBack: () => void;
   isDarkMode?: boolean;
+  timePhase?: 'day' | 'sunset' | 'night';
 }
 
 const GRAVITY = 2000;
@@ -20,7 +21,7 @@ const GROUND_HEIGHT = 100;
 
 const COLORS = ['#FFD700', '#1E90FF', '#FF4757', '#2ED573']; // Yellow, Blue, Red, Green
 
-export default function GameCanvas({ mode, playerName, onBack, isDarkMode = false }: GameCanvasProps) {
+export default function GameCanvas({ mode, playerName, onBack, isDarkMode = false, timePhase = 'day' }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<'ready' | 'playing' | 'gameover' | 'matchmaking' | 'countdown' | 'spectating' | 'waiting_restart'>('ready');
   const [score, setScore] = useState(0);
@@ -399,6 +400,9 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       if (isDarkMode) {
         skyGradient.addColorStop(0, '#0B0F19');
         skyGradient.addColorStop(1, '#1E1B4B');
+      } else if (timePhase === 'sunset') {
+        skyGradient.addColorStop(0, '#FB923C'); // orange-400
+        skyGradient.addColorStop(1, '#F43F5E'); // rose-500
       } else {
         skyGradient.addColorStop(0, '#38BDF8');
         skyGradient.addColorStop(1, '#BAE6FD');
@@ -422,7 +426,7 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.globalAlpha = 1.0;
       } else {
         // Draw Sunbeams
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fillStyle = timePhase === 'sunset' ? 'rgba(255, 200, 100, 0.15)' : 'rgba(255, 255, 255, 0.15)';
         ctx.beginPath();
         ctx.moveTo(width * 0.2, -50);
         ctx.lineTo(width * 0.4, -50);
@@ -442,8 +446,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
       if (isDarkMode) {
         ctx.lineWidth = 2;
         // Distant city
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = '#FF00FF';
         ctx.strokeStyle = '#FF00FF';
         ctx.fillStyle = '#0F172A';
         for (let i = 0; i < 15; i++) {
@@ -453,7 +455,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
           ctx.strokeRect(x, height - GROUND_HEIGHT - h, 65, h);
         }
 
-        ctx.shadowColor = '#00FFFF';
         ctx.strokeStyle = '#00FFFF';
         for (let i = 0; i < 10; i++) {
           const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
@@ -461,15 +462,14 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
           ctx.fillRect(x, height - GROUND_HEIGHT - h, 80, h);
           ctx.strokeRect(x, height - GROUND_HEIGHT - h, 80, h);
         }
-        ctx.shadowBlur = 0;
       } else {
-        ctx.fillStyle = '#7DD3FC'; // lighter blue for distant city
+        ctx.fillStyle = timePhase === 'sunset' ? '#F43F5E' : '#7DD3FC'; // lighter blue for distant city
         for (let i = 0; i < 15; i++) {
           const x = (i * 60 - s.bgOffset * 0.5) % (width + 60) - 60;
           const h = 100 + (i % 5) * 40;
           ctx.fillRect(x, height - GROUND_HEIGHT - h, 65, h);
         }
-        ctx.fillStyle = '#38BDF8'; // closer city
+        ctx.fillStyle = timePhase === 'sunset' ? '#E11D48' : '#38BDF8'; // closer city
         for (let i = 0; i < 10; i++) {
           const x = (i * 100 - s.bgOffset) % (width + 100) - 100;
           const h = 80 + (i % 3) * 50;
@@ -507,11 +507,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.strokeStyle = isDarkMode ? '#A7F3D0' : '#14532D';
         ctx.lineWidth = 3;
 
-        if (isDarkMode) {
-          ctx.shadowBlur = 10;
-          ctx.shadowColor = '#34D399';
-        }
-
         // Top pipe
         ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
         ctx.strokeRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
@@ -530,8 +525,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
         ctx.fillStyle = capGrad;
         ctx.fillRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
         ctx.strokeRect(pipe.x - 4, bottomY, PIPE_WIDTH + 8, 24);
-
-        ctx.shadowBlur = 0;
       });
 
       // Draw Ground
@@ -541,8 +534,6 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
         ctx.strokeStyle = '#F472B6';
         ctx.lineWidth = 2;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#F472B6';
 
         ctx.beginPath();
         for (let i = 0; i < 4; i++) {
@@ -555,14 +546,10 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
           ctx.lineTo(x - 50, height);
         }
         ctx.stroke();
-        ctx.shadowBlur = 0;
 
         // Ground top border
-        ctx.fillStyle = '#E0E7FF';
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = '#38BDF8';
+        ctx.fillStyle = '#38BDF8';
         ctx.fillRect(0, height - GROUND_HEIGHT, width, 4);
-        ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = '#DED895';
         ctx.fillRect(0, height - GROUND_HEIGHT, width, GROUND_HEIGHT);
@@ -1010,27 +997,13 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
 
     animationFrameId = requestAnimationFrame(loop);
 
-    const handleVisibilityChange = () => {
-      const s = stateRef.current;
-      if (document.visibilityState === 'hidden' && s.state === 'playing' && mode === 'ranked') {
-        // Kill local birds if player tabs out during a ranked match
-        s.birds.forEach(bird => {
-          if (bird.isLocal && bird.alive) {
-            die(bird);
-          }
-        });
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       cancelAnimationFrame(animationFrameId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [mode, isDarkMode]);
+  }, [mode, isDarkMode, timePhase]);
 
   return (
-    <div className={`relative w-full h-screen flex items-center justify-center overflow-hidden transition-colors duration-500 font-['Fredoka_One',cursive] ${isDarkMode ? 'bg-slate-950' : 'bg-slate-900'}`}>
+    <div className={`relative w-full h-screen flex items-center justify-center overflow-hidden transition-colors duration-500 font-['Fredoka_One',cursive] ${isDarkMode ? 'bg-slate-950' : timePhase === 'sunset' ? 'bg-orange-800' : 'bg-slate-900'}`}>
       <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#475569 2px, transparent 2px)', backgroundSize: '30px 30px' }}></div>
       <div className={`relative w-full max-w-[500px] h-full max-h-[800px] shadow-2xl overflow-hidden transition-colors duration-500 rounded-none md:rounded-3xl md:h-[95vh] md:border-8 ${isDarkMode ? 'bg-[#0B0F19] md:border-slate-800/80 shadow-[0_0_80px_rgba(236,72,153,0.15)]' : 'bg-[#87CEEB] md:border-slate-800'}`}>
 
