@@ -1089,6 +1089,7 @@ export default function GameCanvas({ mode, playerName, onBack, isDarkMode = fals
     return () => {
       cancelAnimationFrame(animationFrameId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (deathBroadcastIntervalRef.current) clearInterval(deathBroadcastIntervalRef.current);
     };
   }, [mode, isDarkMode]);
 
